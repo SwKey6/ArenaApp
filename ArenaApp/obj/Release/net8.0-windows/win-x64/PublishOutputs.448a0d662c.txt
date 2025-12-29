@@ -1,0 +1,5 @@
+D:\MyApps\CopyOfArena\ArenaApp_Release\ArenaApp.exe
+D:\MyApps\CopyOfArena\ArenaApp_Release\ArenaApp.dll
+D:\MyApps\CopyOfArena\ArenaApp_Release\ArenaApp.deps.json
+D:\MyApps\CopyOfArena\ArenaApp_Release\ArenaApp.runtimeconfig.json
+D:\MyApps\CopyOfArena\ArenaApp_Release\ArenaApp.pdb

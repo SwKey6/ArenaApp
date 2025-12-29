@@ -1,0 +1,12 @@
+D:\MyApps\CopyOfArena\SimpleBuild\ArenaApp.exe
+D:\MyApps\CopyOfArena\SimpleBuild\ArenaApp.dll
+D:\MyApps\CopyOfArena\SimpleBuild\ArenaApp.deps.json
+D:\MyApps\CopyOfArena\SimpleBuild\ArenaApp.runtimeconfig.json
+D:\MyApps\CopyOfArena\SimpleBuild\ArenaApp.pdb
+D:\MyApps\CopyOfArena\SimpleBuild\NAudio.dll
+D:\MyApps\CopyOfArena\SimpleBuild\NAudio.Asio.dll
+D:\MyApps\CopyOfArena\SimpleBuild\NAudio.Core.dll
+D:\MyApps\CopyOfArena\SimpleBuild\NAudio.Midi.dll
+D:\MyApps\CopyOfArena\SimpleBuild\NAudio.Wasapi.dll
+D:\MyApps\CopyOfArena\SimpleBuild\NAudio.WinForms.dll
+D:\MyApps\CopyOfArena\SimpleBuild\NAudio.WinMM.dll

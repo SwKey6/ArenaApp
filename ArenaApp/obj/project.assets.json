@@ -573,19 +573,19 @@
     ]
   },
   "packageFolders": {
-    "C:\\Users\\11\\.nuget\\packages\\": {}
+    "C:\\Users\\Gleb\\.nuget\\packages\\": {}
   },
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "D:\\MyApps\\CopyOfArena\\ArenaApp\\ArenaApp.csproj",
+      "projectUniqueName": "C:\\MyApps\\Arena\\ArenaApp\\ArenaApp\\ArenaApp.csproj",
       "projectName": "ArenaApp",
-      "projectPath": "D:\\MyApps\\CopyOfArena\\ArenaApp\\ArenaApp.csproj",
-      "packagesPath": "C:\\Users\\11\\.nuget\\packages\\",
-      "outputPath": "D:\\MyApps\\CopyOfArena\\ArenaApp\\obj\\",
+      "projectPath": "C:\\MyApps\\Arena\\ArenaApp\\ArenaApp\\ArenaApp.csproj",
+      "packagesPath": "C:\\Users\\Gleb\\.nuget\\packages\\",
+      "outputPath": "C:\\MyApps\\Arena\\ArenaApp\\ArenaApp\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
-        "C:\\Users\\11\\AppData\\Roaming\\NuGet\\NuGet.Config",
+        "C:\\Users\\Gleb\\AppData\\Roaming\\NuGet\\NuGet.Config",
         "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
       ],
       "originalTargetFrameworks": [
@@ -648,7 +648,7 @@
             "privateAssets": "none"
           }
         },
-        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.403/PortableRuntimeIdentifierGraph.json"
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.414/PortableRuntimeIdentifierGraph.json"
       }
     }
   },
@@ -657,7 +657,7 @@
       "code": "NU1701",
       "level": "Warning",
       "warningLevel": 1,
-      "message": "Package 'System.Windows.Forms 4.0.0' was restored using '.NETFramework,Version=v4.6.1, .NETFramework,Version=v4.6.2, .NETFramework,Version=v4.7, .NETFramework,Version=v4.7.1, .NETFramework,Version=v4.7.2, .NETFramework,Version=v4.8, .NETFramework,Version=v4.8.1' instead of the project target framework 'net8.0-windows7.0'. This package may not be fully compatible with your project.",
+      "message": "Пакет \"System.Windows.Forms 4.0.0\" был восстановлен с помощью \".NETFramework,Version=v4.6.1, .NETFramework,Version=v4.6.2, .NETFramework,Version=v4.7, .NETFramework,Version=v4.7.1, .NETFramework,Version=v4.7.2, .NETFramework,Version=v4.8, .NETFramework,Version=v4.8.1\", а не целевой платформы проекта \"net8.0-windows7.0\". Этот пакет может быть не полностью совместим с вашим проектом.",
       "libraryId": "System.Windows.Forms",
       "targetGraphs": [
         "net8.0-windows7.0"

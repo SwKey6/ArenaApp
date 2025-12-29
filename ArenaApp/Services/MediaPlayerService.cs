@@ -624,7 +624,44 @@ namespace ArenaApp.Services
                 SetSecondaryMediaElement?.Invoke(secondaryMediaElement);
             }
             
-            secondaryWindow.Content = secondaryMediaElement;
+            // Получаем или создаем Grid для второго экрана, чтобы сохранить текстовые элементы
+            Grid? secondaryGrid = null;
+            if (secondaryWindow.Content is Grid existingGrid)
+            {
+                secondaryGrid = existingGrid;
+                // Удаляем старые MediaElement и Image элементы, но сохраняем TextBlock
+                var oldMediaElements = secondaryGrid.Children.OfType<MediaElement>().ToList();
+                foreach (var oldMedia in oldMediaElements)
+                {
+                    secondaryGrid.Children.Remove(oldMedia);
+                }
+                var oldImages = secondaryGrid.Children.OfType<Image>().ToList();
+                foreach (var oldImage in oldImages)
+                {
+                    secondaryGrid.Children.Remove(oldImage);
+                }
+            }
+            else
+            {
+                // Если Content не Grid, создаем новый Grid и перемещаем существующий контент
+                secondaryGrid = new Grid();
+                var existingContent = secondaryWindow.Content;
+                secondaryWindow.Content = null;
+                
+                if (existingContent is UIElement uiElement)
+                {
+                    secondaryGrid.Children.Add(uiElement);
+                }
+                
+                secondaryWindow.Content = secondaryGrid;
+            }
+            
+            // Добавляем MediaElement в Grid (под текстом, ZIndex = 0 по умолчанию)
+            if (!secondaryGrid.Children.Contains(secondaryMediaElement))
+            {
+                secondaryGrid.Children.Insert(0, secondaryMediaElement);
+            }
+            
             secondaryMediaElement.Source = new Uri(mediaSlot.MediaPath);
             
             var slotPosition = GetSlotPosition?.Invoke(slotKey) ?? TimeSpan.Zero;
@@ -701,7 +738,42 @@ namespace ArenaApp.Services
                 VerticalAlignment = VerticalAlignment.Stretch,
                 Margin = new Thickness(0)
             };
-            secondaryWindow.Content = secondaryImageElement;
+            
+            // Получаем или создаем Grid для второго экрана, чтобы сохранить текстовые элементы
+            Grid? secondaryGrid = null;
+            if (secondaryWindow.Content is Grid existingGrid)
+            {
+                secondaryGrid = existingGrid;
+                // Удаляем старые MediaElement и Image элементы, но сохраняем TextBlock
+                var oldMediaElements = secondaryGrid.Children.OfType<MediaElement>().ToList();
+                foreach (var oldMedia in oldMediaElements)
+                {
+                    secondaryGrid.Children.Remove(oldMedia);
+                }
+                var oldImages = secondaryGrid.Children.OfType<Image>().ToList();
+                foreach (var oldImage in oldImages)
+                {
+                    secondaryGrid.Children.Remove(oldImage);
+                }
+            }
+            else
+            {
+                // Если Content не Grid, создаем новый Grid и перемещаем существующий контент
+                secondaryGrid = new Grid();
+                var existingContent = secondaryWindow.Content;
+                secondaryWindow.Content = null;
+                
+                if (existingContent is UIElement uiElement)
+                {
+                    secondaryGrid.Children.Add(uiElement);
+                }
+                
+                secondaryWindow.Content = secondaryGrid;
+            }
+            
+            // Добавляем Image в Grid (под текстом, ZIndex = 0 по умолчанию)
+            secondaryGrid.Children.Insert(0, secondaryImageElement);
+            
             System.Diagnostics.Debug.WriteLine($"СИНХРОНИЗАЦИЯ ИЗОБРАЖЕНИЯ: Передано изображение {mediaSlot.MediaPath} на дополнительный экран");
         }
         
@@ -876,16 +948,44 @@ namespace ArenaApp.Services
             
             // Синхронизируем с дополнительным экраном
             var secondaryWindow = GetSecondaryScreenWindow?.Invoke();
+            System.Diagnostics.Debug.WriteLine($"СИНХРОНИЗАЦИЯ ТЕКСТА: secondaryWindow = {(secondaryWindow != null ? "не null" : "null")}");
+            
             if (secondaryWindow != null)
             {
-                TextBlock? existingSecondaryTextElement = null;
-                if (secondaryWindow.Content is Grid secondaryGrid)
+                // Получаем или создаем Grid для второго экрана
+                Grid? secondaryGrid = null;
+                if (secondaryWindow.Content is Grid existingGrid)
                 {
-                    existingSecondaryTextElement = secondaryGrid.Children.OfType<TextBlock>().FirstOrDefault();
+                    secondaryGrid = existingGrid;
+                    System.Diagnostics.Debug.WriteLine($"СИНХРОНИЗАЦИЯ ТЕКСТА: Используем существующий Grid. Детей: {existingGrid.Children.Count}");
                 }
+                else
+                {
+                    // Если Content не Grid, создаем новый Grid и перемещаем существующий контент
+                    secondaryGrid = new Grid();
+                    var existingContent = secondaryWindow.Content;
+                    
+                    System.Diagnostics.Debug.WriteLine($"СИНХРОНИЗАЦИЯ ТЕКСТА: Создаем новый Grid. Существующий контент: {(existingContent != null ? existingContent.GetType().Name : "null")}");
+                    
+                    // Сначала отсоединяем существующий контент от Window
+                    secondaryWindow.Content = null;
+                    
+                    // Теперь можем безопасно добавить его в Grid
+                    if (existingContent is UIElement uiElement)
+                    {
+                        secondaryGrid.Children.Add(uiElement);
+                    }
+                    
+                    // Устанавливаем Grid как новый Content
+                    secondaryWindow.Content = secondaryGrid;
+                }
+                
+                // Ищем существующий текстовый элемент
+                var existingSecondaryTextElement = secondaryGrid.Children.OfType<TextBlock>().FirstOrDefault();
                 
                 if (existingSecondaryTextElement == null)
                 {
+                    // Создаем новый текстовый элемент
                     var secondaryTextElement = new TextBlock
                     {
                         Text = mediaSlot.TextContent,
@@ -895,9 +995,10 @@ namespace ArenaApp.Services
                         Background = mediaSlot.BackgroundColor == "Transparent" ? Brushes.Transparent : new SolidColorBrush((Color)ColorConverter.ConvertFromString(mediaSlot.BackgroundColor)),
                         TextWrapping = TextWrapping.Wrap,
                         TextAlignment = GetTextAlignment?.Invoke(mediaSlot.TextPosition) ?? TextAlignment.Center,
-                        VerticalAlignment = GetVerticalAlignment?.Invoke(mediaSlot.TextPosition) ?? VerticalAlignment.Center,
-                        HorizontalAlignment = GetHorizontalAlignment?.Invoke(mediaSlot.TextPosition) ?? HorizontalAlignment.Center,
-                        Padding = new Thickness(20)
+                        Padding = new Thickness(20),
+                        // Текст должен занимать весь экран на втором мониторе
+                        HorizontalAlignment = HorizontalAlignment.Stretch,
+                        VerticalAlignment = VerticalAlignment.Stretch
                     };
                     
                     if (mediaSlot.UseManualPosition)
@@ -907,37 +1008,23 @@ namespace ArenaApp.Services
                         secondaryTextElement.VerticalAlignment = VerticalAlignment.Top;
                     }
                     
-                    if (secondaryWindow.Content is Grid existingSecondaryGrid)
-                    {
-                        secondaryTextElement.SetValue(Grid.ZIndexProperty, 10);
-                        existingSecondaryGrid.Children.Add(secondaryTextElement);
-                    }
-                    else
-                    {
-                        var newSecondaryGrid = new Grid();
-                        var existingContent = secondaryWindow.Content;
-                        secondaryWindow.Content = null;
-                        
-                        if (existingContent is UIElement uiElement)
-                        {
-                            newSecondaryGrid.Children.Add(uiElement);
-                        }
-                        
-                        secondaryTextElement.SetValue(Grid.ZIndexProperty, 10);
-                        newSecondaryGrid.Children.Add(secondaryTextElement);
-                        secondaryWindow.Content = newSecondaryGrid;
-                    }
+                    // Устанавливаем высокий ZIndex чтобы текст был поверх медиа
+                    secondaryTextElement.SetValue(Grid.ZIndexProperty, 10);
+                    secondaryTextElement.Visibility = Visibility.Visible;
+                    secondaryGrid.Children.Add(secondaryTextElement);
+                    
+                    System.Diagnostics.Debug.WriteLine($"СИНХРОНИЗАЦИЯ ТЕКСТА: Создан новый TextBlock на втором экране. Текст: '{mediaSlot.TextContent}', Детей в Grid: {secondaryGrid.Children.Count}");
                 }
                 else
                 {
+                    // Обновляем существующий текстовый элемент
                     existingSecondaryTextElement.Text = mediaSlot.TextContent;
+                    existingSecondaryTextElement.Visibility = Visibility.Visible;
                     existingSecondaryTextElement.FontFamily = new FontFamily(mediaSlot.FontFamily);
                     existingSecondaryTextElement.FontSize = mediaSlot.FontSize;
                     existingSecondaryTextElement.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(mediaSlot.FontColor));
                     existingSecondaryTextElement.Background = mediaSlot.BackgroundColor == "Transparent" ? Brushes.Transparent : new SolidColorBrush((Color)ColorConverter.ConvertFromString(mediaSlot.BackgroundColor));
                     existingSecondaryTextElement.TextAlignment = GetTextAlignment?.Invoke(mediaSlot.TextPosition) ?? TextAlignment.Center;
-                    existingSecondaryTextElement.VerticalAlignment = GetVerticalAlignment?.Invoke(mediaSlot.TextPosition) ?? VerticalAlignment.Center;
-                    existingSecondaryTextElement.HorizontalAlignment = GetHorizontalAlignment?.Invoke(mediaSlot.TextPosition) ?? HorizontalAlignment.Center;
                     
                     if (mediaSlot.UseManualPosition)
                     {
@@ -948,10 +1035,19 @@ namespace ArenaApp.Services
                     else
                     {
                         existingSecondaryTextElement.Margin = new Thickness(0);
+                        // Текст должен занимать весь экран на втором мониторе
+                        existingSecondaryTextElement.HorizontalAlignment = HorizontalAlignment.Stretch;
+                        existingSecondaryTextElement.VerticalAlignment = VerticalAlignment.Stretch;
                     }
+                    
+                    System.Diagnostics.Debug.WriteLine($"СИНХРОНИЗАЦИЯ ТЕКСТА: Обновлен существующий TextBlock на втором экране. Текст: '{mediaSlot.TextContent}'");
                 }
                 
-                System.Diagnostics.Debug.WriteLine($"СИНХРОНИЗАЦИЯ ТЕКСТА: Передан текст '{mediaSlot.TextContent}' на дополнительный экран");
+                System.Diagnostics.Debug.WriteLine($"СИНХРОНИЗАЦИЯ ТЕКСТА: Завершено. Детей в Grid: {secondaryGrid.Children.Count}, TextBlock: {secondaryGrid.Children.OfType<TextBlock>().Count()}");
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine($"СИНХРОНИЗАЦИЯ ТЕКСТА: secondaryWindow == null, синхронизация пропущена");
             }
             
             UpdateAllSlotButtonsHighlighting?.Invoke();

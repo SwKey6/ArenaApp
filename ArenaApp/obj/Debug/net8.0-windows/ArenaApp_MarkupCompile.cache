@@ -4,16 +4,16 @@
 winexe
 C#
 .cs
-D:\MyApps\CopyOfArena\ArenaApp\obj\Debug\net8.0-windows\
+C:\MyApps\Arena\ArenaApp\ArenaApp\obj\Debug\net8.0-windows\
 ArenaApp
 none
 false
 TRACE;DEBUG;NET;NET8_0;NETCOREAPP
-D:\MyApps\CopyOfArena\ArenaApp\App.xaml
+C:\MyApps\Arena\ArenaApp\ArenaApp\App.xaml
 3-1922938398
 
-201314641104
-213-1673964875
+28-1146238519
+2131406155741
 ContentTypeDialog.xaml;MainWindow.xaml;TextInputDialog.xaml;
 
 False

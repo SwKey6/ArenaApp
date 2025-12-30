@@ -48,6 +48,7 @@ public partial class MainWindow : Window
     private readonly Services.SlotCreationService _slotCreationService = new();
     private readonly Services.AutoPlayService _autoPlayService = new();
     private readonly Services.MediaControlService _mediaControlService = new();
+    private readonly Services.TriggerPlaybackService _triggerPlaybackService = new();
     
     // Свойства для обратной совместимости с MediaStateService
     private string? _currentMainMedia
@@ -487,6 +488,36 @@ public partial class MainWindow : Window
         };
         _mediaControlService.SetIsVideoPlaying = (playing) => isVideoPlaying = playing;
         _mediaControlService.SetIsAudioPlaying = (playing) => isAudioPlaying = playing;
+        
+        // Настройка TriggerPlaybackService
+        _triggerPlaybackService.SetMediaStateService(_mediaStateService);
+        _triggerPlaybackService.SetTriggerManager(_triggerManager);
+        _triggerPlaybackService.GetMainMediaElement = () => mediaElement;
+        _triggerPlaybackService.GetMediaBorder = () => mediaBorder;
+        _triggerPlaybackService.GetMainContentGrid = () => (Grid)Content;
+        _triggerPlaybackService.GetDispatcher = () => Dispatcher;
+        _triggerPlaybackService.GetCurrentMainMedia = () => _currentMainMedia;
+        _triggerPlaybackService.SetCurrentMainMedia = (value) => _currentMainMedia = value;
+        _triggerPlaybackService.GetCurrentVisualContent = () => _currentVisualContent;
+        _triggerPlaybackService.SetCurrentVisualContent = (value) => _currentVisualContent = value;
+        _triggerPlaybackService.GetCurrentAudioContent = () => _currentAudioContent;
+        _triggerPlaybackService.SetCurrentAudioContent = (value) => _currentAudioContent = value;
+        _triggerPlaybackService.IsMediaFileAlreadyPlaying = (path) => IsMediaFileAlreadyPlaying(path);
+        _triggerPlaybackService.RegisterActiveMediaFile = (path) => RegisterActiveMediaFile(path);
+        _triggerPlaybackService.GetSlotPosition = (slotKey) => GetSlotPosition(slotKey);
+        _triggerPlaybackService.SaveSlotPosition = (slotKey, position) => SaveSlotPosition(slotKey, position);
+        _triggerPlaybackService.TryGetAudioSlot = (slotKey) => _mediaStateService.TryGetAudioSlot(slotKey, out var element) ? element : null;
+        _triggerPlaybackService.TryGetAudioContainer = (slotKey) => _activeAudioContainers.TryGetValue(slotKey, out var container) ? container : null;
+        _triggerPlaybackService.AddAudioSlot = (slotKey, element, container) => _mediaStateService.AddAudioSlot(slotKey, element, container);
+        _triggerPlaybackService.GetTriggerState = (column) => GetTriggerState(column);
+        _triggerPlaybackService.SetTriggerState = (column, state) => SetTriggerState(column, state);
+        _triggerPlaybackService.GetActiveTriggerColumn = () => _activeTriggerColumn;
+        _triggerPlaybackService.SetActiveTriggerColumn = (column) => _activeTriggerColumn = column;
+        _triggerPlaybackService.GetLastUsedTriggerColumn = () => _lastUsedTriggerColumn;
+        _triggerPlaybackService.SetLastUsedTriggerColumn = (column) => _lastUsedTriggerColumn = column;
+        _triggerPlaybackService.SetIsVideoPlaying = (playing) => isVideoPlaying = playing;
+        _triggerPlaybackService.SetIsAudioPlaying = (playing) => isAudioPlaying = playing;
+        _triggerPlaybackService.UpdateAllSlotButtonsHighlighting = () => UpdateAllSlotButtonsHighlighting();
         
         // Настройка DialogService
         _dialogService.SetDeviceManager(_deviceManager);
@@ -2217,437 +2248,17 @@ public partial class MainWindow : Window
 
     private void StartVideoWithAudio(int column, MediaSlot videoSlot, MediaSlot audioSlot, Button triggerButton)
     {
-        try
-        {
-            // Проверяем, играет ли аудио в отдельном слоте ПЕРЕД вызовом SmartStopTriggers
-            bool wasAudioPlayingInSlot = IsMediaFileAlreadyPlaying(audioSlot.MediaPath) && 
-                                        _currentAudioContent != null && 
-                                        _currentAudioContent.StartsWith("Slot_") &&
-                                        _activeAudioSlots.ContainsKey(_currentAudioContent);
-            
-            // Проверяем, играет ли аудио в триггере (включая тот же триггер)
-            bool wasAudioPlayingInTrigger = IsMediaFileAlreadyPlaying(audioSlot.MediaPath) && 
-                                           _currentAudioContent != null && 
-                                           _currentAudioContent.StartsWith("Trigger_") &&
-                                           _activeAudioSlots.ContainsKey(_currentAudioContent);
-            
-            // Сохраняем ссылки на аудио элемент ДО вызова SmartStopTriggers
-            MediaElement? existingAudioElement = null;
-            Grid? existingAudioContainer = null;
-            string? existingAudioSlotKey = null;
-            
-            if (wasAudioPlayingInSlot)
-            {
-                if (_mediaStateService.TryGetAudioSlot(_currentAudioContent!, out var existingAudio) && existingAudio != null)
-                {
-                    existingAudioElement = existingAudio;
-                    if (_activeAudioContainers.TryGetValue(_currentAudioContent!, out var existingContainer))
-                    {
-                        existingAudioContainer = existingContainer;
-                    }
-                    existingAudioSlotKey = _currentAudioContent;
-                    System.Diagnostics.Debug.WriteLine($"StartVideoWithAudio: Сохранили ссылки на существующий аудио элемент из слота");
-                }
-            }
-            else if (wasAudioPlayingInTrigger)
-            {
-                if (_mediaStateService.TryGetAudioSlot(_currentAudioContent!, out var existingAudio) && existingAudio != null)
-                {
-                    existingAudioElement = existingAudio;
-                    if (_activeAudioContainers.TryGetValue(_currentAudioContent!, out var existingContainer))
-                    {
-                        existingAudioContainer = existingContainer;
-                    }
-                    existingAudioSlotKey = _currentAudioContent;
-                    System.Diagnostics.Debug.WriteLine($"StartVideoWithAudio: Сохранили ссылки на существующий аудио элемент из триггера");
-                }
-            }
-            
-            bool audioAlreadyPlayingInSlot = wasAudioPlayingInSlot;
-            bool audioAlreadyPlayingInTrigger = wasAudioPlayingInTrigger;
-            bool audioAlreadyPlaying = audioAlreadyPlayingInSlot || audioAlreadyPlayingInTrigger;
-            
-            if (audioAlreadyPlaying)
-            {
-                // Аудио уже играет - используем его, не создаем новый
-                // Не останавливаем аудио, только меняем визуальную часть
-                if (_currentMainMedia == $"Trigger_{column}")
-                {
-                    mediaElement.Stop();
-                    mediaElement.Source = null;
-                    _currentMainMedia = null;
-                }
-            }
-            else
-            {
-                // Обычная остановка
-                // ЗАКОММЕНТИРОВАНО - триггеры отключены
-                // StopParallelMedia(column, triggerButton);
-            }
-            
-            // Загружаем видео в основной плеер
-            mediaElement.Source = new Uri(videoSlot.MediaPath);
-            string triggerKey = $"Trigger_{column}";
-            mediaElement.MediaOpened += (s2, e2) =>
-            {
-                var slotPosition = GetSlotPosition(triggerKey);
-                if (slotPosition > TimeSpan.Zero)
-                {
-                    mediaElement.Position = slotPosition;
-                }
-            };
-            RegisterActiveMediaFile(videoSlot.MediaPath);
-            
-            MediaElement audioElement;
-            Grid tempGrid;
-            
-            if (audioAlreadyPlaying && existingAudioElement != null)
-            {
-                // Используем сохраненный аудио элемент - НЕ ТРОГАЕМ его!
-                audioElement = existingAudioElement;
-                tempGrid = existingAudioContainer!;
-                
-                System.Diagnostics.Debug.WriteLine($"StartVideoWithAudio: НЕ ТРОГАЕМ существующий аудио элемент - он уже играет");
-            }
-            else
-            {
-                // Создаем новый MediaElement для аудио
-                audioElement = new MediaElement
-                {
-                    Source = new Uri(audioSlot.MediaPath),
-                    LoadedBehavior = MediaState.Manual
-                };
-                RegisterActiveMediaFile(audioSlot.MediaPath);
-
-                // Восстанавливаем позицию аудио (если оно играло раньше)
-                audioElement.MediaOpened += (s2, e2) =>
-                {
-                    // Используем сохраненную позицию триггера
-                    var slotPosition = GetSlotPosition(triggerKey);
-                    if (slotPosition > TimeSpan.Zero)
-                    {
-                        audioElement.Position = slotPosition;
-                    }
-                };
-
-                // Создаем временный контейнер для аудио
-                tempGrid = new Grid { Visibility = Visibility.Hidden };
-                tempGrid.Children.Add(audioElement);
-                ((Grid)Content).Children.Add(tempGrid);
-            }
-
-            // Сохраняем ссылки
-            _activeAudioElements[column] = audioElement;
-            _tempContainers[column] = tempGrid;
-
-            // Подписываемся на событие окончания воспроизведения
-            audioElement.MediaEnded += (s, e) => 
-            {
-                // ЗАКОММЕНТИРОВАНО - триггеры отключены
-                // Dispatcher.Invoke(() => StopParallelMedia(column, triggerButton));
-            };
-            
-            mediaElement.MediaEnded += (s, e) => 
-            {
-                // ЗАКОММЕНТИРОВАНО - триггеры отключены
-                // Dispatcher.Invoke(() => StopParallelMedia(column, triggerButton));
-            };
-
-            // Синхронизируем воспроизведение
-            mediaElement.Play();
-            
-            if (!audioAlreadyPlaying)
-            {
-                // Запускаем аудио только если создали новый элемент
-                audioElement.Play();
-                System.Diagnostics.Debug.WriteLine($"StartVideoWithAudio: Запускаем новый аудио элемент");
-            }
-            else
-            {
-                System.Diagnostics.Debug.WriteLine($"StartVideoWithAudio: НЕ ЗАПУСКАЕМ аудио - оно уже играет");
-            }
-            isVideoPlaying = true;
-            isAudioPlaying = true;
-
-            // Устанавливаем что основной плеер принадлежит этому триггеру
-            _currentMainMedia = $"Trigger_{column}";
-            _currentVisualContent = $"Trigger_{column}";
-            
-            // Регистрируем аудио как активное
-            if (!audioAlreadyPlaying)
-            {
-                // Регистрируем новый аудио элемент
-                _activeAudioSlots[triggerKey] = audioElement;
-                _activeAudioContainers[triggerKey] = tempGrid;
-            }
-            else
-            {
-                // Переиспользуем существующий аудио элемент
-                _activeAudioSlots[triggerKey] = audioElement;
-                _activeAudioContainers[triggerKey] = tempGrid;
-            }
-            _currentAudioContent = triggerKey;
-
-            // Обновляем состояние
-            SetTriggerState(column, TriggerState.Playing);
-            _activeTriggerColumn = column;
-            _lastUsedTriggerColumn = column;
-            
-            // Отладочная информация
-            System.Diagnostics.Debug.WriteLine($"Установлено состояние Playing для триггера колонки {column}");
-            
-            // Обновляем подсветку всех кнопок
-            UpdateAllSlotButtonsHighlighting();
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show($"Ошибка при параллельном воспроизведении: {ex.Message}", "Ошибка");
-        }
+        _triggerPlaybackService.StartVideoWithAudio(column, videoSlot, audioSlot);
     }
 
     private void StartImageWithAudio(int column, MediaSlot imageSlot, MediaSlot audioSlot, Button triggerButton)
     {
-        try
-        {
-            // Проверяем, играет ли аудио в отдельном слоте ПЕРЕД вызовом SmartStopTriggers
-            bool wasAudioPlayingInSlot = IsMediaFileAlreadyPlaying(audioSlot.MediaPath) && 
-                                        _currentAudioContent != null && 
-                                        _currentAudioContent.StartsWith("Slot_") &&
-                                        _activeAudioSlots.ContainsKey(_currentAudioContent);
-            
-            // Проверяем, играет ли аудио в триггере (включая тот же триггер)
-            bool wasAudioPlayingInTrigger = IsMediaFileAlreadyPlaying(audioSlot.MediaPath) && 
-                                           _currentAudioContent != null && 
-                                           _currentAudioContent.StartsWith("Trigger_") &&
-                                           _activeAudioSlots.ContainsKey(_currentAudioContent);
-            
-            // Сохраняем ссылки на аудио элемент ДО вызова SmartStopTriggers
-            MediaElement? existingAudioElement = null;
-            Grid? existingAudioContainer = null;
-            string? existingAudioSlotKey = null;
-            
-            if (wasAudioPlayingInSlot)
-            {
-                if (_mediaStateService.TryGetAudioSlot(_currentAudioContent!, out var existingAudio) && existingAudio != null)
-                {
-                    existingAudioElement = existingAudio;
-                    if (_activeAudioContainers.TryGetValue(_currentAudioContent!, out var existingContainer))
-                    {
-                        existingAudioContainer = existingContainer;
-                    }
-                    existingAudioSlotKey = _currentAudioContent;
-                    System.Diagnostics.Debug.WriteLine($"StartImageWithAudio: Сохранили ссылки на существующий аудио элемент из слота");
-                }
-            }
-            else if (wasAudioPlayingInTrigger)
-            {
-                if (_mediaStateService.TryGetAudioSlot(_currentAudioContent!, out var existingAudio) && existingAudio != null)
-                {
-                    existingAudioElement = existingAudio;
-                    if (_activeAudioContainers.TryGetValue(_currentAudioContent!, out var existingContainer))
-                    {
-                        existingAudioContainer = existingContainer;
-                    }
-                    existingAudioSlotKey = _currentAudioContent;
-                    System.Diagnostics.Debug.WriteLine($"StartImageWithAudio: Сохранили ссылки на существующий аудио элемент из триггера");
-                }
-            }
-            
-            bool audioAlreadyPlayingInSlot = wasAudioPlayingInSlot;
-            bool audioAlreadyPlayingInTrigger = wasAudioPlayingInTrigger;
-            bool audioAlreadyPlaying = audioAlreadyPlayingInSlot || audioAlreadyPlayingInTrigger;
-            
-            if (audioAlreadyPlaying)
-            {
-                // Аудио уже играет - используем его, не создаем новый
-                // Не останавливаем аудио, только меняем визуальную часть
-                if (_currentMainMedia == $"Trigger_{column}")
-                {
-                    mediaElement.Stop();
-                    mediaElement.Source = null;
-                    _currentMainMedia = null;
-                }
-            }
-            else
-            {
-                // Обычная остановка (аудио уже остановлено в SmartStopTriggers)
-                // ЗАКОММЕНТИРОВАНО - триггеры отключены
-                // StopParallelMedia(column, triggerButton);
-            }
-            
-            // Очищаем MediaElement и создаем Image для показа картинки
-            mediaElement.Stop();
-            mediaElement.Source = null;
-            mediaElement.Visibility = Visibility.Hidden;
-            
-            var imageElement = new Image
-            {
-                Source = new BitmapImage(new Uri(imageSlot.MediaPath)),
-                Stretch = Stretch.Uniform, // Изменено с UniformToFill на Uniform чтобы не обрезать
-                Width = 600,
-                Height = 400
-            };
-            
-            // Заменяем MediaElement на изображение в Border
-            mediaBorder.Child = imageElement;
-            
-            MediaElement audioElement;
-            Grid tempGrid;
-            string triggerKey = $"Trigger_{column}";
-            
-            if (audioAlreadyPlaying && existingAudioElement != null)
-            {
-                // Используем сохраненный аудио элемент - НЕ ТРОГАЕМ его!
-                audioElement = existingAudioElement;
-                tempGrid = existingAudioContainer!;
-                
-                System.Diagnostics.Debug.WriteLine($"StartImageWithAudio: НЕ ТРОГАЕМ существующий аудио элемент - он уже играет");
-            }
-            else
-            {
-                // Создаем новый MediaElement для аудио
-                audioElement = new MediaElement
-                {
-                    Source = new Uri(audioSlot.MediaPath),
-                    LoadedBehavior = MediaState.Manual
-                };
-                audioElement.MediaOpened += (s2, e2) =>
-                {
-                    var slotPosition = GetSlotPosition(triggerKey);
-                    if (slotPosition > TimeSpan.Zero)
-                    {
-                        audioElement.Position = slotPosition;
-                    }
-                };
-                RegisterActiveMediaFile(audioSlot.MediaPath);
-
-                // Создаем временный контейнер для аудио
-                tempGrid = new Grid { Visibility = Visibility.Hidden };
-                tempGrid.Children.Add(audioElement);
-                ((Grid)Content).Children.Add(tempGrid);
-            }
-
-            // Сохраняем ссылки
-            _activeAudioElements[column] = audioElement;
-            _tempContainers[column] = tempGrid;
-
-            // Подписываемся на событие окончания аудио
-            audioElement.MediaEnded += (s, e) => 
-            {
-                // ЗАКОММЕНТИРОВАНО - триггеры отключены
-                // Dispatcher.Invoke(() => StopParallelMedia(column, triggerButton));
-            };
-
-            // Воспроизводим аудио (только если создали новый элемент)
-            if (!audioAlreadyPlaying)
-            {
-                audioElement.Play();
-                System.Diagnostics.Debug.WriteLine($"StartImageWithAudio: Запускаем новый аудио элемент");
-            }
-            else
-            {
-                System.Diagnostics.Debug.WriteLine($"StartImageWithAudio: НЕ ЗАПУСКАЕМ аудио - оно уже играет");
-            }
-            isAudioPlaying = true;
-
-            // Устанавливаем что основной плеер принадлежит этому триггеру
-            _currentMainMedia = $"Trigger_{column}";
-            _currentVisualContent = $"Trigger_{column}";
-            
-            // Регистрируем аудио как активное (только если создали новый элемент)
-            if (!audioAlreadyPlaying)
-            {
-                _activeAudioSlots[triggerKey] = audioElement;
-                _activeAudioContainers[triggerKey] = tempGrid;
-                _currentAudioContent = triggerKey;
-            }
-            else
-            {
-                // Обновляем только текущий контент - аудио продолжает играть
-                // Но нужно добавить элемент в _activeAudioSlots с ключом триггера для таймера
-                _activeAudioSlots[triggerKey] = audioElement;
-                _activeAudioContainers[triggerKey] = tempGrid;
-                _currentAudioContent = triggerKey;
-            }
-
-            // Обновляем состояние
-            SetTriggerState(column, TriggerState.Playing);
-            _activeTriggerColumn = column;
-            _lastUsedTriggerColumn = column;
-            
-            // Отладочная информация
-            System.Diagnostics.Debug.WriteLine($"Установлено состояние Playing для триггера колонки {column}");
-            
-            // Обновляем подсветку всех кнопок
-            UpdateAllSlotButtonsHighlighting();
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show($"Ошибка при параллельном воспроизведении: {ex.Message}", "Ошибка");
-        }
+        _triggerPlaybackService.StartImageWithAudio(column, imageSlot, audioSlot);
     }
 
     private void StartSingleMedia(int column, MediaSlot mediaSlot, Button triggerButton)
     {
-        try
-        {
-            // Для триггеров: аудио из отдельных слотов уже остановлено в SmartStopTriggers
-            // Если аудио играет в триггере - продолжаем его воспроизведение
-            
-            // Останавливаем предыдущее воспроизведение, если есть
-            // Но не останавливаем аудио, если оно должно продолжить играть
-            if (mediaSlot.Type == MediaType.Audio && IsMediaFileAlreadyPlaying(mediaSlot.MediaPath) && _currentAudioContent != null && _currentAudioContent.StartsWith("Trigger_"))
-            {
-                // Аудио уже играет в триггере - не останавливаем его
-                // Останавливаем только визуальную часть
-                if (_currentMainMedia == $"Trigger_{column}")
-                {
-                    mediaElement.Stop();
-                    mediaElement.Source = null;
-                    _currentMainMedia = null;
-                }
-            }
-            else
-            {
-                // Обычная остановка
-                // ЗАКОММЕНТИРОВАНО - триггеры отключены
-                // StopParallelMedia(column, triggerButton);
-            }
-            
-            // Загружаем медиа в основной плеер
-            mediaElement.Source = new Uri(mediaSlot.MediaPath);
-            RegisterActiveMediaFile(mediaSlot.MediaPath);
-            
-            // Подписываемся на событие окончания воспроизведения
-            mediaElement.MediaEnded += (s, e) => 
-            {
-                // ЗАКОММЕНТИРОВАНО - триггеры отключены
-                // Dispatcher.Invoke(() => StopParallelMedia(column, triggerButton));
-            };
-
-            // Воспроизводим
-            mediaElement.Play();
-            isVideoPlaying = true;
-
-            // Устанавливаем что основной плеер принадлежит этому триггеру
-            _currentMainMedia = $"Trigger_{column}";
-            _currentVisualContent = $"Trigger_{column}";
-
-            // Обновляем состояние
-            SetTriggerState(column, TriggerState.Playing);
-            _activeTriggerColumn = column;
-            _lastUsedTriggerColumn = column;
-            
-            // Отладочная информация
-            System.Diagnostics.Debug.WriteLine($"Установлено состояние Playing для триггера колонки {column}");
-            
-            // Обновляем подсветку всех кнопок
-            UpdateAllSlotButtonsHighlighting();
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show($"Ошибка при воспроизведении: {ex.Message}", "Ошибка");
-        }
+        _triggerPlaybackService.StartSingleMedia(column, mediaSlot);
     }
 
     /// <summary>
@@ -3386,17 +2997,13 @@ public partial class MainWindow
         ApplyTextSettings();
     }
     
-    private void TextPositionComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void TextContentTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (_selectedElementSlot == null || _selectedElementSlot.Type != MediaType.Text) return;
         
-        if (TextPositionComboBox.SelectedItem is ComboBoxItem selectedItem)
-        {
-            _selectedElementSlot.TextPosition = selectedItem.Tag?.ToString() ?? "Center";
-            ApplyTextSettings();
-        }
+        _selectedElementSlot.TextContent = TextContentTextBox.Text;
+        ApplyTextSettings();
     }
-    
     
     private void UseManualPositionCheckBox_Checked(object sender, RoutedEventArgs e)
     {
@@ -3450,15 +3057,13 @@ public partial class MainWindow
         {
             System.Diagnostics.Debug.WriteLine($"ApplyTextSettings: Найден текстовый элемент с текстом: '{textElement.Text}'");
             // Обновляем свойства текста
+            textElement.Text = _selectedElementSlot.TextContent ?? "";
             textElement.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(_selectedElementSlot.FontColor));
             textElement.FontFamily = new FontFamily(_selectedElementSlot.FontFamily);
             textElement.FontSize = _selectedElementSlot.FontSize;
             textElement.Opacity = 1.0; // Убираем прозрачность, всегда 100%
-            textElement.TextAlignment = GetTextAlignment(_selectedElementSlot.TextPosition);
-            textElement.VerticalAlignment = GetVerticalAlignment(_selectedElementSlot.TextPosition);
-            textElement.HorizontalAlignment = GetHorizontalAlignment(_selectedElementSlot.TextPosition);
             
-            // Применяем ручную настройку положения если включена
+            // Применяем ручную настройку положения
             if (_selectedElementSlot.UseManualPosition)
             {
                 textElement.Margin = new Thickness(_selectedElementSlot.TextX, _selectedElementSlot.TextY, 0, 0);
@@ -3468,6 +3073,8 @@ public partial class MainWindow
             else
             {
                 textElement.Margin = new Thickness(0);
+                textElement.HorizontalAlignment = HorizontalAlignment.Center;
+                textElement.VerticalAlignment = VerticalAlignment.Center;
             }
             
             // Управляем видимостью
@@ -3490,12 +3097,11 @@ public partial class MainWindow
             var secondaryTextElement = secondaryGrid.Children.OfType<TextBlock>().FirstOrDefault();
             if (secondaryTextElement != null)
             {
+                secondaryTextElement.Text = _selectedElementSlot.TextContent ?? "";
                 secondaryTextElement.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(_selectedElementSlot.FontColor));
+                secondaryTextElement.FontFamily = new FontFamily(_selectedElementSlot.FontFamily);
                 secondaryTextElement.FontSize = _selectedElementSlot.FontSize;
                 secondaryTextElement.Opacity = 1.0; // Убираем прозрачность, всегда 100%
-                secondaryTextElement.TextAlignment = GetTextAlignment(_selectedElementSlot.TextPosition);
-                secondaryTextElement.VerticalAlignment = GetVerticalAlignment(_selectedElementSlot.TextPosition);
-                secondaryTextElement.HorizontalAlignment = GetHorizontalAlignment(_selectedElementSlot.TextPosition);
                 
                 if (_selectedElementSlot.UseManualPosition)
                 {
@@ -3506,6 +3112,8 @@ public partial class MainWindow
                 else
                 {
                     secondaryTextElement.Margin = new Thickness(0);
+                    secondaryTextElement.HorizontalAlignment = HorizontalAlignment.Center;
+                    secondaryTextElement.VerticalAlignment = VerticalAlignment.Center;
                 }
                 
                 secondaryTextElement.Visibility = _selectedElementSlot.IsTextVisible ? Visibility.Visible : Visibility.Hidden;
@@ -3693,7 +3301,12 @@ public partial class MainWindow
                 }
             }
             
+            // Убеждаемся, что MediaElement видим и правильно настроен
+            mediaElement.Visibility = Visibility.Visible;
+            mediaElement.LoadedBehavior = MediaState.Manual;
+            
             mediaElement.Source = new Uri(_selectedElementSlot.MediaPath);
+            _currentMainMedia = _selectedElementKey;
             
             // Восстанавливаем позицию после загрузки медиа
             RoutedEventHandler? mediaOpenedHandler = null;
@@ -3702,15 +3315,87 @@ public partial class MainWindow
                 // Отписываемся от события, чтобы избежать повторных вызовов
                 mediaElement.MediaOpened -= mediaOpenedHandler;
                 
+                // Убеждаемся, что элемент видим
+                mediaElement.Visibility = Visibility.Visible;
+                
                 if (_mediaResumePositions.TryGetValue(_selectedElementSlot.MediaPath, out var resumePosition))
                 {
                     mediaElement.Position = resumePosition;
+                    // Синхронизируем позицию со вторым экраном
+                    if (_secondaryMediaElement != null && _secondaryMediaElement.Source != null)
+                    {
+                        try
+                        {
+                            _secondaryMediaElement.Position = resumePosition;
+                        }
+                        catch { }
+                    }
                 }
-            mediaElement.Play();
-            _currentMainMedia = _selectedElementKey;
-            isVideoPlaying = true;
+                // Убеждаемся, что mediaBorder видим
+                mediaBorder.Visibility = Visibility.Visible;
+                
+                // Убеждаемся, что прозрачность не равна 0
+                var currentOpacity = mediaElement.Opacity;
+                if (currentOpacity <= 0)
+                {
+                    mediaElement.Opacity = 1.0;
+                    System.Diagnostics.Debug.WriteLine($"ПРЕДУПРЕЖДЕНИЕ: Прозрачность была {currentOpacity}, устанавливаем 1.0");
+                }
+                
+                System.Diagnostics.Debug.WriteLine($"ElementPlay_Click (Video): Запускаем видео, Source={mediaElement.Source?.LocalPath}, Opacity={mediaElement.Opacity}, Visibility={mediaElement.Visibility}");
+                
+                mediaElement.Play();
+                SyncPlayWithSecondaryScreen();
+                isVideoPlaying = true;
+                
+                // Применяем настройки после загрузки
+                if (_selectedElementSlot != null && !string.IsNullOrEmpty(_selectedElementKey))
+                {
+                    ApplyElementSettings(_selectedElementSlot, _selectedElementKey);
+                }
             };
             mediaElement.MediaOpened += mediaOpenedHandler;
+            
+            // Если медиа уже загружено, запускаем сразу
+            if (mediaElement.NaturalDuration.HasTimeSpan)
+            {
+                mediaElement.Visibility = Visibility.Visible;
+                mediaBorder.Visibility = Visibility.Visible;
+                
+                // Убеждаемся, что прозрачность не равна 0
+                var currentOpacity = mediaElement.Opacity;
+                if (currentOpacity <= 0)
+                {
+                    mediaElement.Opacity = 1.0;
+                    System.Diagnostics.Debug.WriteLine($"ПРЕДУПРЕЖДЕНИЕ: Прозрачность была {currentOpacity}, устанавливаем 1.0");
+                }
+                
+                if (_mediaResumePositions.TryGetValue(_selectedElementSlot.MediaPath, out var resumePosition))
+                {
+                    mediaElement.Position = resumePosition;
+                    // Синхронизируем позицию со вторым экраном
+                    if (_secondaryMediaElement != null && _secondaryMediaElement.Source != null)
+                    {
+                        try
+                        {
+                            _secondaryMediaElement.Position = resumePosition;
+                        }
+                        catch { }
+                    }
+                }
+                
+                System.Diagnostics.Debug.WriteLine($"ElementPlay_Click (Video): Запускаем уже загруженное видео, Source={mediaElement.Source?.LocalPath}, Opacity={mediaElement.Opacity}, Visibility={mediaElement.Visibility}");
+                
+                mediaElement.Play();
+                SyncPlayWithSecondaryScreen();
+                isVideoPlaying = true;
+                
+                // Применяем настройки после загрузки
+                if (_selectedElementSlot != null && !string.IsNullOrEmpty(_selectedElementKey))
+                {
+                    ApplyElementSettings(_selectedElementSlot, _selectedElementKey);
+                }
+            }
         }
         else if (_selectedElementSlot.Type == MediaType.Image)
         {
@@ -4201,9 +3886,21 @@ public partial class MainWindow
             TextSettingsGroupBox.Visibility = Visibility.Visible;
             LoadTextSettings();
         }
+        else if (_selectedElementSlot.Type == MediaType.Image)
+        {
+            // Для изображений скрываем скорость и громкость (они не применимы)
+            SpeedGroupBox.Visibility = Visibility.Collapsed;
+            VolumeGroupBox.Visibility = Visibility.Collapsed;
+            
+            // Показываем прозрачность и другие настройки
+            OpacityGroupBox.Visibility = Visibility.Visible;
+            
+            // Скрываем настройки текста
+            TextSettingsGroupBox.Visibility = Visibility.Collapsed;
+        }
         else
         {
-            // Для медиа элементов показываем все настройки
+            // Для видео и аудио показываем все настройки
             SpeedGroupBox.Visibility = Visibility.Visible;
             OpacityGroupBox.Visibility = Visibility.Visible;
             VolumeGroupBox.Visibility = Visibility.Visible;
@@ -4227,7 +3924,7 @@ public partial class MainWindow
         TextColorComboBox.SelectionChanged -= TextColorComboBox_SelectionChanged;
         FontFamilyComboBox.SelectionChanged -= FontFamilyComboBox_SelectionChanged;
         FontSizeSlider.ValueChanged -= FontSizeSlider_ValueChanged;
-        TextPositionComboBox.SelectionChanged -= TextPositionComboBox_SelectionChanged;
+        TextContentTextBox.TextChanged -= TextContentTextBox_TextChanged;
         UseManualPositionCheckBox.Checked -= UseManualPositionCheckBox_Checked;
         UseManualPositionCheckBox.Unchecked -= UseManualPositionCheckBox_Unchecked;
         TextXTextBox.TextChanged -= TextXTextBox_TextChanged;
@@ -4257,15 +3954,8 @@ public partial class MainWindow
         FontSizeSlider.Value = _selectedElementSlot.FontSize;
         FontSizeValueText.Text = $"{_selectedElementSlot.FontSize:F0}px";
         
-        // Загружаем положение
-        for (int i = 0; i < TextPositionComboBox.Items.Count; i++)
-        {
-            if (TextPositionComboBox.Items[i] is ComboBoxItem item && item.Tag.ToString() == _selectedElementSlot.TextPosition)
-            {
-                TextPositionComboBox.SelectedIndex = i;
-                break;
-            }
-        }
+        // Загружаем содержимое текста
+        TextContentTextBox.Text = _selectedElementSlot.TextContent ?? "";
         
         // Загружаем ручную настройку положения
         UseManualPositionCheckBox.IsChecked = _selectedElementSlot.UseManualPosition;
@@ -4289,7 +3979,7 @@ public partial class MainWindow
         TextColorComboBox.SelectionChanged += TextColorComboBox_SelectionChanged;
         FontFamilyComboBox.SelectionChanged += FontFamilyComboBox_SelectionChanged;
         FontSizeSlider.ValueChanged += FontSizeSlider_ValueChanged;
-        TextPositionComboBox.SelectionChanged += TextPositionComboBox_SelectionChanged;
+        TextContentTextBox.TextChanged += TextContentTextBox_TextChanged;
         UseManualPositionCheckBox.Checked += UseManualPositionCheckBox_Checked;
         UseManualPositionCheckBox.Unchecked += UseManualPositionCheckBox_Unchecked;
         TextXTextBox.TextChanged += TextXTextBox_TextChanged;
@@ -4365,10 +4055,23 @@ public partial class MainWindow
                     ApplyScaleAndRotation(secondaryElement, finalScale, finalRotation);
                 }
             }
-            else
+            else if (slot.Type == MediaType.Video)
             {
                 // Для видео применяем прозрачность к MediaElement
+                this.mediaElement.Visibility = Visibility.Visible;
+                
+                // Проверяем, что прозрачность не равна 0
+                if (finalOpacity <= 0)
+                {
+                    System.Diagnostics.Debug.WriteLine($"ПРЕДУПРЕЖДЕНИЕ: Прозрачность равна {finalOpacity}, устанавливаем 1.0");
+                    finalOpacity = 1.0;
+                }
+                
                 this.mediaElement.Opacity = finalOpacity;
+                
+                // Убеждаемся, что mediaBorder видим
+                mediaBorder.Visibility = Visibility.Visible;
+                mediaBorder.Opacity = 1.0; // Border всегда непрозрачен
                 
                 // Применяем масштаб и поворот к mediaBorder для правильного центра поворота
                 ApplyScaleAndRotation(mediaBorder, finalScale, finalRotation);
@@ -4376,9 +4079,12 @@ public partial class MainWindow
                 // Синхронизируем прозрачность, масштаб и поворот видео на втором экране
                 if (_secondaryMediaElement != null)
                 {
+                    _secondaryMediaElement.Visibility = Visibility.Visible;
                     _secondaryMediaElement.Opacity = finalOpacity;
                     ApplyScaleAndRotation(_secondaryMediaElement, finalScale, finalRotation);
                 }
+                
+                System.Diagnostics.Debug.WriteLine($"ApplyElementSettings (Video): Opacity={finalOpacity}, Visibility=Visible, SlotKey={slotKey}, Source={this.mediaElement.Source?.LocalPath}");
             }
             
             // Для текстовых блоков применяем прозрачность, масштаб и поворот
@@ -4800,523 +4506,13 @@ public partial class MainWindow
     // Применить переход между медиа элементами
     private async Task ApplyTransition(Action transitionAction)
     {
-        if (_projectManager?.CurrentProject?.GlobalSettings == null)
-        {
-            transitionAction();
-            return;
-        }
-        
-        var globalSettings = _projectManager.CurrentProject.GlobalSettings;
-        
-        if (globalSettings.TransitionType == TransitionType.Instant)
-        {
-            transitionAction();
-            return;
-        }
-        
-        // Применяем переход
-        switch (globalSettings.TransitionType)
-        {
-            case TransitionType.Fade:
-                await ApplyFadeTransition(transitionAction, globalSettings.TransitionDuration);
-                break;
-            case TransitionType.Slide:
-                await ApplySlideTransition(transitionAction, globalSettings.TransitionDuration);
-                break;
-            case TransitionType.Zoom:
-                await ApplyZoomTransition(transitionAction, globalSettings.TransitionDuration);
-                break;
-        }
+        await _transitionService.ApplyTransition(transitionAction, null);
     }
     
     // Применить переход между медиа элементами с поддержкой второго экрана
     private async Task ApplyTransitionWithSecondaryScreen(Action transitionAction, Action? secondaryTransitionAction = null)
     {
-        if (_projectManager?.CurrentProject?.GlobalSettings == null)
-        {
-            transitionAction();
-            if (secondaryTransitionAction != null)
-                secondaryTransitionAction();
-            return;
-        }
-        
-        var globalSettings = _projectManager.CurrentProject.GlobalSettings;
-        
-        if (globalSettings.TransitionType == TransitionType.Instant)
-        {
-            transitionAction();
-            if (secondaryTransitionAction != null)
-                secondaryTransitionAction();
-            return;
-        }
-        
-        // Применяем переход
-        switch (globalSettings.TransitionType)
-        {
-            case TransitionType.Fade:
-                await ApplyFadeTransitionWithSecondaryScreen(transitionAction, secondaryTransitionAction, globalSettings.TransitionDuration);
-                break;
-            case TransitionType.Slide:
-                await ApplySlideTransitionWithSecondaryScreen(transitionAction, secondaryTransitionAction, globalSettings.TransitionDuration);
-                break;
-            case TransitionType.Zoom:
-                await ApplyZoomTransitionWithSecondaryScreen(transitionAction, secondaryTransitionAction, globalSettings.TransitionDuration);
-                break;
-        }
-    }
-    
-    // Переход затуханием
-    private async Task ApplyFadeTransition(Action transitionAction, double duration)
-    {
-        // Сохраняем текущую прозрачность
-        double originalOpacity = mediaBorder.Opacity;
-        
-        // Плавно уменьшаем прозрачность
-        for (int i = 0; i < 20; i++)
-        {
-            mediaBorder.Opacity = originalOpacity * (1.0 - (i / 20.0));
-            await Task.Delay((int)(duration * 50)); // 20 шагов за duration секунд
-        }
-        
-        // Выполняем переход
-        transitionAction();
-        
-        // Плавно восстанавливаем прозрачность
-        for (int i = 0; i < 20; i++)
-        {
-            mediaBorder.Opacity = originalOpacity * (i / 20.0);
-            await Task.Delay((int)(duration * 50));
-        }
-    }
-    
-    // Переход затуханием с поддержкой второго экрана
-    private async Task ApplyFadeTransitionWithSecondaryScreen(Action transitionAction, Action? secondaryTransitionAction, double duration)
-    {
-        // Сохраняем текущую прозрачность основного экрана
-        double originalOpacity = mediaBorder.Opacity;
-        
-        // Сохраняем текущую прозрачность второго экрана
-        double secondaryOriginalOpacity = 1.0;
-        if (_secondaryScreenWindow?.Content is FrameworkElement secondaryElement)
-        {
-            secondaryOriginalOpacity = secondaryElement.Opacity;
-        }
-        
-        // Плавно уменьшаем прозрачность на обоих экранах одновременно
-        for (int i = 0; i < 20; i++)
-        {
-            double fadeValue = 1.0 - (i / 20.0);
-            mediaBorder.Opacity = originalOpacity * fadeValue;
-            
-            if (_secondaryScreenWindow?.Content is FrameworkElement secondaryElement2)
-            {
-                secondaryElement2.Opacity = secondaryOriginalOpacity * fadeValue;
-            }
-            
-            await Task.Delay((int)(duration * 50)); // 20 шагов за duration секунд
-        }
-        
-        // Выполняем переход на обоих экранах (когда экраны невидимы)
-        transitionAction();
-        if (secondaryTransitionAction != null)
-            secondaryTransitionAction();
-        
-        // Плавно восстанавливаем прозрачность на обоих экранах одновременно
-        for (int i = 0; i < 20; i++)
-        {
-            double fadeValue = i / 20.0;
-            mediaBorder.Opacity = originalOpacity * fadeValue;
-            
-            if (_secondaryScreenWindow?.Content is FrameworkElement secondaryElement3)
-            {
-                secondaryElement3.Opacity = secondaryOriginalOpacity * fadeValue;
-            }
-            
-            await Task.Delay((int)(duration * 50));
-        }
-    }
-    
-    // Переход скольжением
-    private async Task ApplySlideTransition(Action transitionAction, double duration)
-    {
-        // Сохраняем текущую позицию и объединяем с существующими трансформациями
-        var originalTransform = mediaBorder.RenderTransform;
-        var slideTransform = new TranslateTransform();
-        
-        // Если есть существующие трансформации, объединяем их
-        if (originalTransform is TransformGroup existingGroup)
-        {
-            var newGroup = new TransformGroup();
-            foreach (var transform in existingGroup.Children)
-            {
-                if (!(transform is TranslateTransform)) // Исключаем старые TranslateTransform
-                {
-                    newGroup.Children.Add(transform);
-                }
-            }
-            newGroup.Children.Add(slideTransform);
-            mediaBorder.RenderTransform = newGroup;
-        }
-        else
-        {
-            mediaBorder.RenderTransform = slideTransform;
-        }
-        
-        // Скольжение влево
-        for (int i = 0; i < 20; i++)
-        {
-            slideTransform.X = -mediaBorder.Width * (i / 20.0);
-            await Task.Delay((int)(duration * 50));
-        }
-        
-        // Выполняем переход
-        transitionAction();
-        
-        // Скольжение справа
-        slideTransform.X = mediaBorder.Width;
-        for (int i = 0; i < 20; i++)
-        {
-            slideTransform.X = mediaBorder.Width * (1.0 - (i / 20.0));
-            await Task.Delay((int)(duration * 50));
-        }
-        
-        // Восстанавливаем оригинальную трансформацию, но сохраняем масштаб и поворот
-        if (originalTransform is TransformGroup originalGroup)
-        {
-            var restoredGroup = new TransformGroup();
-            foreach (var transform in originalGroup.Children)
-            {
-                if (!(transform is TranslateTransform)) // Исключаем TranslateTransform из анимации
-                {
-                    restoredGroup.Children.Add(transform);
-                }
-            }
-            mediaBorder.RenderTransform = restoredGroup;
-        }
-        else
-        {
-            mediaBorder.RenderTransform = originalTransform;
-        }
-    }
-    
-    // Переход скольжением с поддержкой второго экрана
-    private async Task ApplySlideTransitionWithSecondaryScreen(Action transitionAction, Action? secondaryTransitionAction, double duration)
-    {
-        // Сохраняем текущую позицию основного экрана и объединяем с существующими трансформациями
-        var originalTransform = mediaBorder.RenderTransform;
-        var slideTransform = new TranslateTransform();
-        
-        // Если есть существующие трансформации, объединяем их
-        if (originalTransform is TransformGroup existingGroup)
-        {
-            var newGroup = new TransformGroup();
-            foreach (var transform in existingGroup.Children)
-            {
-                if (!(transform is TranslateTransform)) // Исключаем старые TranslateTransform
-                {
-                    newGroup.Children.Add(transform);
-                }
-            }
-            newGroup.Children.Add(slideTransform);
-            mediaBorder.RenderTransform = newGroup;
-        }
-        else
-        {
-            mediaBorder.RenderTransform = slideTransform;
-        }
-        
-        // Сохраняем текущую позицию второго экрана и объединяем с существующими трансформациями
-        var secondaryOriginalTransform = _secondaryScreenWindow?.Content is FrameworkElement secondaryElement ? secondaryElement.RenderTransform : null;
-        var secondarySlideTransform = new TranslateTransform();
-        if (_secondaryScreenWindow?.Content is FrameworkElement secondaryElement2)
-        {
-            if (secondaryOriginalTransform is TransformGroup secondaryExistingGroup)
-            {
-                var secondaryNewGroup = new TransformGroup();
-                foreach (var transform in secondaryExistingGroup.Children)
-                {
-                    if (!(transform is TranslateTransform)) // Исключаем старые TranslateTransform
-                    {
-                        secondaryNewGroup.Children.Add(transform);
-                    }
-                }
-                secondaryNewGroup.Children.Add(secondarySlideTransform);
-                secondaryElement2.RenderTransform = secondaryNewGroup;
-            }
-            else
-            {
-                secondaryElement2.RenderTransform = secondarySlideTransform;
-            }
-        }
-        
-        // Скольжение влево на обоих экранах одновременно
-        for (int i = 0; i < 20; i++)
-        {
-            double slideValue = i / 20.0;
-            slideTransform.X = -mediaBorder.Width * slideValue;
-            
-            if (_secondaryScreenWindow?.Content is FrameworkElement secondaryElement3)
-            {
-                secondarySlideTransform.X = -secondaryElement3.ActualWidth * slideValue;
-            }
-            
-            await Task.Delay((int)(duration * 50));
-        }
-        
-        // Выполняем переход на обоих экранах (когда экраны невидимы)
-        transitionAction();
-        if (secondaryTransitionAction != null)
-            secondaryTransitionAction();
-        
-        // Скольжение справа на обоих экранах одновременно
-        slideTransform.X = mediaBorder.Width;
-        if (_secondaryScreenWindow?.Content is FrameworkElement secondaryElement4)
-        {
-            secondarySlideTransform.X = secondaryElement4.ActualWidth;
-        }
-        
-        for (int i = 0; i < 20; i++)
-        {
-            double slideValue = 1.0 - (i / 20.0);
-            slideTransform.X = mediaBorder.Width * slideValue;
-            
-            if (_secondaryScreenWindow?.Content is FrameworkElement secondaryElement5)
-            {
-                secondarySlideTransform.X = secondaryElement5.ActualWidth * slideValue;
-            }
-            
-            await Task.Delay((int)(duration * 50));
-        }
-        
-        // Восстанавливаем оригинальные трансформации, но сохраняем масштаб и поворот
-        if (originalTransform is TransformGroup originalGroup)
-        {
-            var restoredGroup = new TransformGroup();
-            foreach (var transform in originalGroup.Children)
-            {
-                if (!(transform is TranslateTransform)) // Исключаем TranslateTransform из анимации
-                {
-                    restoredGroup.Children.Add(transform);
-                }
-            }
-            mediaBorder.RenderTransform = restoredGroup;
-        }
-        else
-        {
-            mediaBorder.RenderTransform = originalTransform;
-        }
-        
-        if (_secondaryScreenWindow?.Content is FrameworkElement secondaryElement6)
-        {
-            if (secondaryOriginalTransform is TransformGroup secondaryOriginalGroup)
-            {
-                var secondaryRestoredGroup = new TransformGroup();
-                foreach (var transform in secondaryOriginalGroup.Children)
-                {
-                    if (!(transform is TranslateTransform)) // Исключаем TranslateTransform из анимации
-                    {
-                        secondaryRestoredGroup.Children.Add(transform);
-                    }
-                }
-                secondaryElement6.RenderTransform = secondaryRestoredGroup;
-            }
-            else
-            {
-                secondaryElement6.RenderTransform = secondaryOriginalTransform;
-            }
-        }
-    }
-    
-    // Переход увеличением/уменьшением
-    private async Task ApplyZoomTransition(Action transitionAction, double duration)
-    {
-        // Сохраняем текущую трансформацию и объединяем с существующими трансформациями
-        var originalTransform = mediaBorder.RenderTransform;
-        var zoomTransform = new ScaleTransform();
-        
-        // Если есть существующие трансформации, объединяем их
-        if (originalTransform is TransformGroup existingGroup)
-        {
-            var newGroup = new TransformGroup();
-            foreach (var transform in existingGroup.Children)
-            {
-                if (!(transform is ScaleTransform)) // Исключаем старые ScaleTransform
-                {
-                    newGroup.Children.Add(transform);
-                }
-            }
-            newGroup.Children.Add(zoomTransform);
-            mediaBorder.RenderTransform = newGroup;
-        }
-        else
-        {
-            mediaBorder.RenderTransform = zoomTransform;
-        }
-        
-        // Уменьшение
-        for (int i = 0; i < 20; i++)
-        {
-            double scale = 1.0 - (i / 20.0) * 0.5; // Уменьшаем до 50%
-            zoomTransform.ScaleX = scale;
-            zoomTransform.ScaleY = scale;
-            await Task.Delay((int)(duration * 50));
-        }
-        
-        // Выполняем переход
-        transitionAction();
-        
-        // Увеличение
-        for (int i = 0; i < 20; i++)
-        {
-            double scale = 0.5 + (i / 20.0) * 0.5; // Увеличиваем от 50% до 100%
-            zoomTransform.ScaleX = scale;
-            zoomTransform.ScaleY = scale;
-            await Task.Delay((int)(duration * 50));
-        }
-        
-        // Восстанавливаем оригинальную трансформацию, но сохраняем масштаб и поворот
-        if (originalTransform is TransformGroup originalGroup)
-        {
-            var restoredGroup = new TransformGroup();
-            foreach (var transform in originalGroup.Children)
-            {
-                if (!(transform is ScaleTransform)) // Исключаем ScaleTransform из анимации
-                {
-                    restoredGroup.Children.Add(transform);
-                }
-            }
-            mediaBorder.RenderTransform = restoredGroup;
-        }
-        else
-        {
-            mediaBorder.RenderTransform = originalTransform;
-        }
-    }
-    
-    // Переход увеличением/уменьшением с поддержкой второго экрана
-    private async Task ApplyZoomTransitionWithSecondaryScreen(Action transitionAction, Action? secondaryTransitionAction, double duration)
-    {
-        // Сохраняем текущую трансформацию основного экрана и объединяем с существующими трансформациями
-        var originalTransform = mediaBorder.RenderTransform;
-        var zoomTransform = new ScaleTransform();
-        
-        // Если есть существующие трансформации, объединяем их
-        if (originalTransform is TransformGroup existingGroup)
-        {
-            var newGroup = new TransformGroup();
-            foreach (var transform in existingGroup.Children)
-            {
-                if (!(transform is ScaleTransform)) // Исключаем старые ScaleTransform
-                {
-                    newGroup.Children.Add(transform);
-                }
-            }
-            newGroup.Children.Add(zoomTransform);
-            mediaBorder.RenderTransform = newGroup;
-        }
-        else
-        {
-            mediaBorder.RenderTransform = zoomTransform;
-        }
-        
-        // Сохраняем текущую трансформацию второго экрана и объединяем с существующими трансформациями
-        var secondaryOriginalTransform = _secondaryScreenWindow?.Content is FrameworkElement secondaryElement ? secondaryElement.RenderTransform : null;
-        var secondaryZoomTransform = new ScaleTransform();
-        if (_secondaryScreenWindow?.Content is FrameworkElement secondaryElement2)
-        {
-            if (secondaryOriginalTransform is TransformGroup secondaryExistingGroup)
-            {
-                var secondaryNewGroup = new TransformGroup();
-                foreach (var transform in secondaryExistingGroup.Children)
-                {
-                    if (!(transform is ScaleTransform)) // Исключаем старые ScaleTransform
-                    {
-                        secondaryNewGroup.Children.Add(transform);
-                    }
-                }
-                secondaryNewGroup.Children.Add(secondaryZoomTransform);
-                secondaryElement2.RenderTransform = secondaryNewGroup;
-            }
-            else
-            {
-                secondaryElement2.RenderTransform = secondaryZoomTransform;
-            }
-        }
-        
-        // Уменьшение на обоих экранах одновременно
-        for (int i = 0; i < 20; i++)
-        {
-            double scale = 1.0 - (i / 20.0) * 0.5; // Уменьшаем до 50%
-            zoomTransform.ScaleX = scale;
-            zoomTransform.ScaleY = scale;
-            
-            if (_secondaryScreenWindow?.Content is FrameworkElement secondaryElement3)
-            {
-                secondaryZoomTransform.ScaleX = scale;
-                secondaryZoomTransform.ScaleY = scale;
-            }
-            
-            await Task.Delay((int)(duration * 50));
-        }
-        
-        // Выполняем переход на обоих экранах (когда экраны невидимы)
-        transitionAction();
-        if (secondaryTransitionAction != null)
-            secondaryTransitionAction();
-        
-        // Увеличение на обоих экранах одновременно
-        for (int i = 0; i < 20; i++)
-        {
-            double scale = 0.5 + (i / 20.0) * 0.5; // Увеличиваем от 50% до 100%
-            zoomTransform.ScaleX = scale;
-            zoomTransform.ScaleY = scale;
-            
-            if (_secondaryScreenWindow?.Content is FrameworkElement secondaryElement4)
-            {
-                secondaryZoomTransform.ScaleX = scale;
-                secondaryZoomTransform.ScaleY = scale;
-            }
-            
-            await Task.Delay((int)(duration * 50));
-        }
-        
-        // Восстанавливаем оригинальные трансформации, но сохраняем масштаб и поворот
-        if (originalTransform is TransformGroup originalGroup)
-        {
-            var restoredGroup = new TransformGroup();
-            foreach (var transform in originalGroup.Children)
-            {
-                if (!(transform is ScaleTransform)) // Исключаем ScaleTransform из анимации
-                {
-                    restoredGroup.Children.Add(transform);
-                }
-            }
-            mediaBorder.RenderTransform = restoredGroup;
-        }
-        else
-        {
-            mediaBorder.RenderTransform = originalTransform;
-        }
-        
-        if (_secondaryScreenWindow?.Content is FrameworkElement secondaryElement5)
-        {
-            if (secondaryOriginalTransform is TransformGroup secondaryOriginalGroup)
-            {
-                var secondaryRestoredGroup = new TransformGroup();
-                foreach (var transform in secondaryOriginalGroup.Children)
-                {
-                    if (!(transform is ScaleTransform)) // Исключаем ScaleTransform из анимации
-                    {
-                        secondaryRestoredGroup.Children.Add(transform);
-                    }
-                }
-                secondaryElement5.RenderTransform = secondaryRestoredGroup;
-            }
-            else
-            {
-                secondaryElement5.RenderTransform = secondaryOriginalTransform;
-            }
-        }
+        await _transitionService.ApplyTransition(transitionAction, secondaryTransitionAction);
     }
     
     // Найти следующий элемент в той же строке для автоперехода

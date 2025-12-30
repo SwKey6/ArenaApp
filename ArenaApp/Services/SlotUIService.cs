@@ -18,8 +18,8 @@ namespace ArenaApp.Services
         
         // Делегаты для работы с UI
         public Func<Panel>? GetBottomPanel { get; set; }
-        public Func<string>? GetCurrentMainMedia { get; set; }
-        public Func<string>? GetCurrentAudioContent { get; set; }
+        public Func<string?>? GetCurrentMainMedia { get; set; }
+        public Func<string?>? GetCurrentAudioContent { get; set; }
         public Func<int?>? GetActiveTriggerColumn { get; set; }
         public Func<int, TriggerState>? GetTriggerState { get; set; }
         

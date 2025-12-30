@@ -479,29 +479,22 @@
                                             <TextBlock x:Name="FontSizeValueText" Grid.Column="2" Text="24px" Foreground="#D8DEE9" VerticalAlignment="Center"/>
                                         </Grid>
                                         
-                                        <!-- Положение текста -->
+                                        <!-- Содержимое текста -->
                                         <Grid Margin="0,0,0,10">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="Auto"/>
                                                 <ColumnDefinition Width="*"/>
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" Text="Положение:" Foreground="#D8DEE9" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                                            <ComboBox x:Name="TextPositionComboBox"
-                                                    Grid.Column="1"
-                                                    SelectedIndex="4"
-                                                    SelectionChanged="TextPositionComboBox_SelectionChanged">
-                                                <ComboBoxItem Content="Верх-лево" Tag="TopLeft"/>
-                                                <ComboBoxItem Content="Верх-центр" Tag="TopCenter"/>
-                                                <ComboBoxItem Content="Верх-право" Tag="TopRight"/>
-                                                <ComboBoxItem Content="Центр-лево" Tag="CenterLeft"/>
-                                                <ComboBoxItem Content="Центр" Tag="Center"/>
-                                                <ComboBoxItem Content="Центр-право" Tag="CenterRight"/>
-                                                <ComboBoxItem Content="Низ-лево" Tag="BottomLeft"/>
-                                                <ComboBoxItem Content="Низ-центр" Tag="BottomCenter"/>
-                                                <ComboBoxItem Content="Низ-право" Tag="BottomRight"/>
-                                            </ComboBox>
+                                            <TextBlock Grid.Column="0" Text="Содержимое:" Foreground="#D8DEE9" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                            <TextBox x:Name="TextContentTextBox"
+                                                   Grid.Column="1"
+                                                   Text=""
+                                                   TextChanged="TextContentTextBox_TextChanged"
+                                                   MinHeight="60"
+                                                   TextWrapping="Wrap"
+                                                   AcceptsReturn="True"
+                                                   VerticalScrollBarVisibility="Auto"/>
                                         </Grid>
-                                        
                                         
                                         <!-- Ручная настройка положения -->
                                         <CheckBox x:Name="UseManualPositionCheckBox"

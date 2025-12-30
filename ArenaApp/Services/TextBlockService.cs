@@ -15,7 +15,7 @@ namespace ArenaApp.Services
     {
         // Делегаты для доступа к UI элементам
         public Func<Grid>? GetTextOverlayGrid { get; set; }
-        public Func<Window>? GetSecondaryScreenWindow { get; set; }
+        public Func<Window?>? GetSecondaryScreenWindow { get; set; }
         
         /// <summary>
         /// Создает или обновляет текстовый блок

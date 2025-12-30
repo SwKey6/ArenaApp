@@ -1,20 +1,20 @@
 ﻿ArenaApp
-
+1.0.0.0
 
 winexe
 C#
 .cs
-C:\MyApps\Arena\ArenaApp\ArenaApp\obj\Debug\net8.0-windows\
+c:\MyApps\Arena\ArenaApp\ArenaApp\obj\Debug\net8.0-windows\
 ArenaApp
 none
 false
-TRACE;DEBUG;NET;NET8_0;NETCOREAPP
-C:\MyApps\Arena\ArenaApp\ArenaApp\App.xaml
+TRACE;DEBUG;NET;NET8_0;NETCOREAPP;WINDOWS;WINDOWS7_0;NET5_0_OR_GREATER;NET6_0_OR_GREATER;NET7_0_OR_GREATER;NET8_0_OR_GREATER;NETCOREAPP3_0_OR_GREATER;NETCOREAPP3_1_OR_GREATER;WINDOWS7_0_OR_GREATER
+c:\MyApps\Arena\ArenaApp\ArenaApp\App.xaml
 3-1922938398
 
-28-1146238519
+31-1140529421
 2131406155741
 ContentTypeDialog.xaml;MainWindow.xaml;TextInputDialog.xaml;
 
-False
+True
 

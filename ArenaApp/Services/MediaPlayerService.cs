@@ -26,18 +26,18 @@ namespace ArenaApp.Services
         public Func<MediaElement>? GetMainMediaElement { get; set; }
         public Func<Border>? GetMediaBorder { get; set; }
         public Func<Grid>? GetTextOverlayGrid { get; set; }
-        public Func<MediaElement>? GetSecondaryMediaElement { get; set; }
-        public Func<Window>? GetSecondaryScreenWindow { get; set; }
+        public Func<MediaElement?>? GetSecondaryMediaElement { get; set; }
+        public Func<Window?>? GetSecondaryScreenWindow { get; set; }
         public Func<Grid>? GetMainContentGrid { get; set; }
         public Func<Dispatcher>? GetDispatcher { get; set; }
         
         // Делегаты для работы с состоянием
-        public Func<string>? GetCurrentMainMedia { get; set; }
-        public Action<string>? SetCurrentMainMedia { get; set; }
-        public Func<string>? GetCurrentVisualContent { get; set; }
-        public Action<string>? SetCurrentVisualContent { get; set; }
-        public Func<string>? GetCurrentAudioContent { get; set; }
-        public Action<string>? SetCurrentAudioContent { get; set; }
+        public Func<string?>? GetCurrentMainMedia { get; set; }
+        public Action<string?>? SetCurrentMainMedia { get; set; }
+        public Func<string?>? GetCurrentVisualContent { get; set; }
+        public Action<string?>? SetCurrentVisualContent { get; set; }
+        public Func<string?>? GetCurrentAudioContent { get; set; }
+        public Action<string?>? SetCurrentAudioContent { get; set; }
         public Func<bool>? GetUseUniformToFill { get; set; }
         public Func<bool>? GetIsVideoPaused { get; set; }
         public Action<bool>? SetIsVideoPaused { get; set; }
@@ -434,51 +434,31 @@ namespace ArenaApp.Services
                 {
                     case MediaType.Video:
                         await LoadVideoFromSlot(mediaSlot, slotKey, mediaElement, mediaBorder, textOverlayGrid);
+                        // Для видео настройки применяются внутри LoadVideoFromSlot после загрузки
                         break;
                         
                     case MediaType.Image:
                         await LoadImageFromSlot(mediaSlot, slotKey, mediaBorder, textOverlayGrid);
+                        // Применяем настройки к изображению
+                        ApplyElementSettings?.Invoke(mediaSlot, slotKey);
                         break;
                         
                     case MediaType.Audio:
                         LoadAudioFromSlot(mediaSlot, slotKey);
+                        // Применяем настройки к аудио
+                        ApplyElementSettings?.Invoke(mediaSlot, slotKey);
                         break;
                         
                     case MediaType.Text:
                         LoadTextFromSlot(mediaSlot, slotKey, mediaBorder, textOverlayGrid);
+                        // Применяем настройки к тексту
+                        ApplyElementSettings?.Invoke(mediaSlot, slotKey);
                         break;
                 }
-                
-                // Применяем настройки к только что загруженному элементу
-                ApplyElementSettings?.Invoke(mediaSlot, slotKey);
                 
                 // Применяем общие настройки после загрузки медиа
                 System.Diagnostics.Debug.WriteLine($"LoadMediaFromSlotSelective: Вызываем ApplyGlobalSettings() после загрузки медиа, _currentMainMedia={GetCurrentMainMedia?.Invoke()}");
                 ApplyGlobalSettings?.Invoke();
-                
-                // Дополнительно принудительно применяем общие настройки к основному медиа элементу
-                var globalSettings = GetGlobalSettings?.Invoke();
-                if (globalSettings != null && globalSettings.UseGlobalOpacity)
-                {
-                    var finalOpacity = globalSettings.GlobalOpacity;
-                    System.Diagnostics.Debug.WriteLine($"LoadMediaFromSlotSelective: Принудительно применяем прозрачность {finalOpacity} к основному медиа элементу");
-                    
-                    if (mediaSlot.Type == MediaType.Image && mediaBorder != null)
-                    {
-                        mediaBorder.Opacity = finalOpacity;
-                        System.Diagnostics.Debug.WriteLine($"LoadMediaFromSlotSelective: Применена прозрачность {finalOpacity} к mediaBorder для изображения");
-                    }
-                    else if (mediaSlot.Type == MediaType.Video && mediaElement != null)
-                    {
-                        mediaElement.Opacity = finalOpacity;
-                        System.Diagnostics.Debug.WriteLine($"LoadMediaFromSlotSelective: Применена прозрачность {finalOpacity} к mediaElement для видео");
-                    }
-                    else if (mediaSlot.Type == MediaType.Text && textOverlayGrid != null)
-                    {
-                        textOverlayGrid.Opacity = finalOpacity;
-                        System.Diagnostics.Debug.WriteLine($"LoadMediaFromSlotSelective: Применена прозрачность {finalOpacity} к textOverlayGrid для текста");
-                    }
-                }
                 
                 // Выбираем элемент для панели настроек
                 SelectElementForSettings?.Invoke(mediaSlot, slotKey);
@@ -524,6 +504,11 @@ namespace ArenaApp.Services
                         UpdateMediaElement(mediaElement);
                         mediaElement.Source = new Uri(mediaSlot.MediaPath);
                         mediaElement.Visibility = Visibility.Visible;
+                        mediaElement.LoadedBehavior = MediaState.Manual;
+                        if (mediaBorder != null)
+                        {
+                            mediaBorder.Visibility = Visibility.Visible;
+                        }
                         RegisterActiveMediaFile?.Invoke(mediaSlot.MediaPath);
                     },
                     () => SyncVideoToSecondaryScreen(mediaSlot, slotKey)
@@ -537,15 +522,26 @@ namespace ArenaApp.Services
                 
                 UpdateMediaElement(mediaElement);
                 mediaElement.Source = new Uri(mediaSlot.MediaPath);
+                mediaElement.Visibility = Visibility.Visible;
+                mediaElement.LoadedBehavior = MediaState.Manual;
+                if (mediaBorder != null)
+                {
+                    mediaBorder.Visibility = Visibility.Visible;
+                }
                 RegisterActiveMediaFile?.Invoke(mediaSlot.MediaPath);
                 SyncVideoToSecondaryScreen(mediaSlot, slotKey);
             }
             
-            // Возобновляем с сохраненной позиции слота
+            // Возобновляем с сохраненной позиции слота и запускаем воспроизведение
             var slotPosition = GetSlotPosition?.Invoke(slotKey) ?? TimeSpan.Zero;
-            if (slotPosition > TimeSpan.Zero)
+            
+            RoutedEventHandler? mediaOpenedHandler = null;
+            mediaOpenedHandler = (s, e) =>
             {
-                mediaElement.MediaOpened += (s, e) =>
+                // Отписываемся от события, чтобы избежать повторных вызовов
+                mediaElement.MediaOpened -= mediaOpenedHandler;
+                
+                if (slotPosition > TimeSpan.Zero)
                 {
                     var duration = mediaElement.NaturalDuration;
                     if (duration.HasTimeSpan)
@@ -582,24 +578,100 @@ namespace ArenaApp.Services
                         }
                         System.Diagnostics.Debug.WriteLine($"ВОССТАНОВЛЕНИЕ ПОЗИЦИИ ВИДЕО LoadMediaFromSlotSelective: {slotKey} -> {slotPosition}");
                     }
-                };
-            }
-            else
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"НЕТ СОХРАНЕННОЙ ПОЗИЦИИ ВИДЕО LoadMediaFromSlotSelective: {slotKey}");
+                }
+                
+                // Убеждаемся, что элементы видимы
+                mediaElement.Visibility = Visibility.Visible;
+                if (mediaBorder != null)
+                {
+                    mediaBorder.Visibility = Visibility.Visible;
+                }
+                
+                // Убеждаемся, что прозрачность не равна 0
+                var currentOpacity = mediaElement.Opacity;
+                if (currentOpacity <= 0)
+                {
+                    mediaElement.Opacity = 1.0;
+                    System.Diagnostics.Debug.WriteLine($"ПРЕДУПРЕЖДЕНИЕ LoadVideoFromSlot: Прозрачность была {currentOpacity}, устанавливаем 1.0");
+                }
+                
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot: Запускаем видео, Source={mediaElement.Source?.LocalPath}, Opacity={mediaElement.Opacity}, Visibility={mediaElement.Visibility}");
+                
+                // Запускаем воспроизведение после загрузки
+                mediaElement.Play();
+                
+                // Синхронизируем воспроизведение с дополнительным экраном
+                var secondaryMediaElement = GetSecondaryMediaElement?.Invoke();
+                if (secondaryMediaElement != null)
+                {
+                    secondaryMediaElement.Visibility = Visibility.Visible;
+                    secondaryMediaElement.Play();
+                    System.Diagnostics.Debug.WriteLine($"СИНХРОНИЗАЦИЯ ВОСПРОИЗВЕДЕНИЯ: Запущено воспроизведение на дополнительном экране");
+                }
+                
+                SetIsVideoPlaying?.Invoke(true);
+            };
+            
+            mediaElement.MediaOpened += mediaOpenedHandler;
+            
+            // Если медиа уже загружено, запускаем сразу
+            if (mediaElement.NaturalDuration.HasTimeSpan)
             {
-                System.Diagnostics.Debug.WriteLine($"НЕТ СОХРАНЕННОЙ ПОЗИЦИИ ВИДЕО LoadMediaFromSlotSelective: {slotKey}");
+                mediaElement.Visibility = Visibility.Visible;
+                if (mediaBorder != null)
+                {
+                    mediaBorder.Visibility = Visibility.Visible;
+                }
+                
+                // Убеждаемся, что прозрачность не равна 0
+                var currentOpacity = mediaElement.Opacity;
+                if (currentOpacity <= 0)
+                {
+                    mediaElement.Opacity = 1.0;
+                    System.Diagnostics.Debug.WriteLine($"ПРЕДУПРЕЖДЕНИЕ LoadVideoFromSlot (уже загружено): Прозрачность была {currentOpacity}, устанавливаем 1.0");
+                }
+                
+                if (slotPosition > TimeSpan.Zero)
+                {
+                    var duration = mediaElement.NaturalDuration;
+                    if (duration.HasTimeSpan)
+                    {
+                        var remainingTime = duration.TimeSpan - slotPosition;
+                        if (remainingTime.TotalSeconds < 0.4)
+                        {
+                            mediaElement.Position = TimeSpan.Zero;
+                        }
+                        else
+                        {
+                            mediaElement.Position = slotPosition;
+                        }
+                    }
+                    else
+                    {
+                        mediaElement.Position = slotPosition;
+                    }
+                }
+                
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot: Запускаем уже загруженное видео, Source={mediaElement.Source?.LocalPath}, Opacity={mediaElement.Opacity}, Visibility={mediaElement.Visibility}");
+                
+                mediaElement.Play();
+                
+                var secondaryMediaElement = GetSecondaryMediaElement?.Invoke();
+                if (secondaryMediaElement != null)
+                {
+                    secondaryMediaElement.Visibility = Visibility.Visible;
+                    secondaryMediaElement.Play();
+                }
+                
+                SetIsVideoPlaying?.Invoke(true);
+                
+                // Применяем настройки элемента ПОСЛЕ запуска видео
+                ApplyElementSettings?.Invoke(mediaSlot, slotKey);
             }
-            
-            mediaElement.Play();
-            
-            // Синхронизируем воспроизведение с дополнительным экраном
-            var secondaryMediaElement = GetSecondaryMediaElement?.Invoke();
-            if (secondaryMediaElement != null)
-            {
-                secondaryMediaElement.Play();
-                System.Diagnostics.Debug.WriteLine($"СИНХРОНИЗАЦИЯ ВОСПРОИЗВЕДЕНИЯ: Запущено воспроизведение на дополнительном экране");
-            }
-            
-            SetIsVideoPlaying?.Invoke(true);
         }
         
         private void SyncVideoToSecondaryScreen(MediaSlot mediaSlot, string slotKey)

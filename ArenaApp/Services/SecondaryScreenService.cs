@@ -23,7 +23,7 @@ namespace ArenaApp.Services
         public Func<MediaElement>? GetMainMediaElement { get; set; }
         public Func<Image>? GetMainImageElement { get; set; }
         public Action<MediaElement>? SetSecondaryMediaElement { get; set; }
-        public Func<Window>? GetSecondaryScreenWindow { get; set; }
+        public Func<Window?>? GetSecondaryScreenWindow { get; set; }
         
         public Window? SecondaryScreenWindow => _secondaryScreenWindow;
         public MediaElement? SecondaryMediaElement => _secondaryMediaElement;

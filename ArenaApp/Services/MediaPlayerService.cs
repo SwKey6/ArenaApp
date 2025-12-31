@@ -500,11 +500,13 @@ namespace ArenaApp.Services
                         mediaElement.Stop();
                         mediaElement.Source = null;
                         
+                        // ВАЖНО: Устанавливаем LoadedBehavior ПЕРЕД установкой Source
+                        mediaElement.LoadedBehavior = MediaState.Manual;
+                        
                         // Обновляем медиа, сохраняя текстовые блоки
                         UpdateMediaElement(mediaElement);
                         mediaElement.Source = new Uri(mediaSlot.MediaPath);
                         mediaElement.Visibility = Visibility.Visible;
-                        mediaElement.LoadedBehavior = MediaState.Manual;
                         if (mediaBorder != null)
                         {
                             mediaBorder.Visibility = Visibility.Visible;
@@ -520,10 +522,12 @@ namespace ArenaApp.Services
                 mediaElement.Stop();
                 mediaElement.Source = null;
                 
+                // ВАЖНО: Устанавливаем LoadedBehavior ПЕРЕД установкой Source
+                mediaElement.LoadedBehavior = MediaState.Manual;
+                
                 UpdateMediaElement(mediaElement);
                 mediaElement.Source = new Uri(mediaSlot.MediaPath);
                 mediaElement.Visibility = Visibility.Visible;
-                mediaElement.LoadedBehavior = MediaState.Manual;
                 if (mediaBorder != null)
                 {
                     mediaBorder.Visibility = Visibility.Visible;
@@ -698,6 +702,7 @@ namespace ArenaApp.Services
             
             // Получаем или создаем Grid для второго экрана, чтобы сохранить текстовые элементы
             Grid? secondaryGrid = null;
+            
             if (secondaryWindow.Content is Grid existingGrid)
             {
                 secondaryGrid = existingGrid;
@@ -715,17 +720,28 @@ namespace ArenaApp.Services
             }
             else
             {
-                // Если Content не Grid, создаем новый Grid и перемещаем существующий контент
+                // Если Content не Grid, создаем новый Grid
                 secondaryGrid = new Grid();
                 var existingContent = secondaryWindow.Content;
-                secondaryWindow.Content = null;
                 
-                if (existingContent is UIElement uiElement)
+                // Проверяем, является ли существующий контент нашим MediaElement
+                if (existingContent == secondaryMediaElement)
                 {
-                    secondaryGrid.Children.Add(uiElement);
+                    // MediaElement уже является Content, просто устанавливаем Grid как новый Content
+                    secondaryWindow.Content = secondaryGrid;
                 }
-                
-                secondaryWindow.Content = secondaryGrid;
+                else
+                {
+                    // Если существующий контент другой, перемещаем его в Grid
+                    secondaryWindow.Content = null;
+                    
+                    if (existingContent is UIElement uiElement && uiElement != secondaryMediaElement)
+                    {
+                        secondaryGrid.Children.Add(uiElement);
+                    }
+                    
+                    secondaryWindow.Content = secondaryGrid;
+                }
             }
             
             // Добавляем MediaElement в Grid (под текстом, ZIndex = 0 по умолчанию)
@@ -733,6 +749,24 @@ namespace ArenaApp.Services
             {
                 secondaryGrid.Children.Insert(0, secondaryMediaElement);
             }
+            
+            // Убеждаемся, что Grid установлен как Content окна
+            if (secondaryWindow.Content != secondaryGrid)
+            {
+                secondaryWindow.Content = secondaryGrid;
+            }
+            
+            // Убеждаемся, что MediaElement видим
+            secondaryMediaElement.Visibility = Visibility.Visible;
+            
+            // Останавливаем предыдущее воспроизведение перед установкой нового Source
+            if (secondaryMediaElement.Source != null)
+            {
+                secondaryMediaElement.Stop();
+            }
+            
+            // ВАЖНО: Устанавливаем LoadedBehavior ПЕРЕД установкой Source
+            secondaryMediaElement.LoadedBehavior = MediaState.Manual;
             
             secondaryMediaElement.Source = new Uri(mediaSlot.MediaPath);
             

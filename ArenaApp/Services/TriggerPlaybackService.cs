@@ -121,6 +121,9 @@ namespace ArenaApp.Services
                     }
                 }
                 
+                // ВАЖНО: Устанавливаем LoadedBehavior ПЕРЕД установкой Source
+                mediaElement.LoadedBehavior = MediaState.Manual;
+                
                 // Загружаем видео в основной плеер
                 mediaElement.Source = new Uri(videoSlot.MediaPath);
                 string triggerKey = $"Trigger_{column}";
@@ -150,8 +153,8 @@ namespace ArenaApp.Services
                     // Создаем новый MediaElement для аудио
                     audioElement = new MediaElement
                     {
-                        Source = new Uri(audioSlot.MediaPath),
-                        LoadedBehavior = MediaState.Manual
+                        LoadedBehavior = MediaState.Manual,
+                        Source = new Uri(audioSlot.MediaPath)
                     };
                     RegisterActiveMediaFile?.Invoke(audioSlot.MediaPath);
 
@@ -332,8 +335,8 @@ namespace ArenaApp.Services
                     // Создаем новый MediaElement для аудио
                     audioElement = new MediaElement
                     {
-                        Source = new Uri(audioSlot.MediaPath),
-                        LoadedBehavior = MediaState.Manual
+                        LoadedBehavior = MediaState.Manual,
+                        Source = new Uri(audioSlot.MediaPath)
                     };
                     audioElement.MediaOpened += (s2, e2) =>
                     {
@@ -434,6 +437,9 @@ namespace ArenaApp.Services
                         SetCurrentMainMedia?.Invoke(null!);
                     }
                 }
+                
+                // ВАЖНО: Устанавливаем LoadedBehavior ПЕРЕД установкой Source
+                mediaElement.LoadedBehavior = MediaState.Manual;
                 
                 // Загружаем медиа в основной плеер
                 mediaElement.Source = new Uri(mediaSlot.MediaPath);

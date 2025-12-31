@@ -49,6 +49,7 @@ public partial class MainWindow : Window
     private readonly Services.AutoPlayService _autoPlayService = new();
     private readonly Services.MediaControlService _mediaControlService = new();
     private readonly Services.TriggerPlaybackService _triggerPlaybackService = new();
+    private readonly Services.VideoDisplayService _videoDisplayService = new();
     
     // Свойства для обратной совместимости с MediaStateService
     private string? _currentMainMedia
@@ -742,6 +743,32 @@ public partial class MainWindow : Window
             System.Diagnostics.Debug.WriteLine($"SetSecondaryMediaElement: Установлен MediaElement для второго экрана");
         };
         // GetSecondaryScreenWindow не используется в сервисе, так как сервис хранит окно сам
+        
+        // Настройка VideoDisplayService
+        _videoDisplayService.GetMainMediaElement = () => mediaElement;
+        _videoDisplayService.GetMediaBorder = () => mediaBorder;
+        _videoDisplayService.GetTextOverlayGrid = () => textOverlayGrid;
+        _videoDisplayService.GetSecondaryMediaElement = () => 
+        {
+            return _secondaryScreenService.SecondaryMediaElement ?? _secondaryMediaElement;
+        };
+        _videoDisplayService.GetCurrentMainMedia = () => _currentMainMedia;
+        _videoDisplayService.SetCurrentMainMedia = (value) => _currentMainMedia = value;
+        _videoDisplayService.SetIsVideoPlaying = (playing) => isVideoPlaying = playing;
+        _videoDisplayService.GetIsVideoPaused = () => _isVideoPaused;
+        _videoDisplayService.SetIsVideoPaused = (value) => _isVideoPaused = value;
+        _videoDisplayService.SyncPlayWithSecondaryScreen = () => SyncPlayWithSecondaryScreen();
+        _videoDisplayService.SyncPauseWithSecondaryScreen = () => SyncPauseWithSecondaryScreen();
+        _videoDisplayService.GetMediaResumePosition = (path) => 
+        {
+            return _mediaStateService.GetMediaResumePosition(path) ?? TimeSpan.Zero;
+        };
+        _videoDisplayService.SaveMediaResumePosition = (path, position) => 
+        {
+            _mediaResumePositions[path] = position;
+            _mediaStateService.SaveMediaResumePosition(path, position);
+        };
+        _videoDisplayService.ApplyElementSettings = (slot, key) => ApplyElementSettings(slot, key);
     }
     
     // Инициализация меню экранов
@@ -1249,62 +1276,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void UpdateMediaElement(MediaElement mediaElement)
     {
-        // Устанавливаем правильный Stretch для медиа, чтобы оно помещалось в зону, а не растягивалось
-        mediaElement.Stretch = Stretch.Uniform;
-        mediaElement.HorizontalAlignment = HorizontalAlignment.Center;
-        mediaElement.VerticalAlignment = VerticalAlignment.Center;
-        
-        // Получаем Grid внутри mediaBorder (который содержит mediaElement и textOverlayGrid)
-        if (mediaBorder.Child is Grid mainGrid)
-        {
-            // Удаляем старый MediaElement если есть
-            var oldMediaElement = mainGrid.Children.OfType<MediaElement>().FirstOrDefault();
-            if (oldMediaElement != null)
-            {
-                mainGrid.Children.Remove(oldMediaElement);
-            }
-            
-            // Удаляем старые Image элементы если есть
-            var oldImages = mainGrid.Children.OfType<Image>().ToList();
-            foreach (var oldImage in oldImages)
-            {
-                mainGrid.Children.Remove(oldImage);
-            }
-            
-            // Добавляем новый MediaElement в начало (под текстом)
-            mainGrid.Children.Insert(0, mediaElement);
-            
-            // Убеждаемся, что textOverlayGrid остается в Grid
-            if (!mainGrid.Children.Contains(textOverlayGrid))
-            {
-                mainGrid.Children.Add(textOverlayGrid);
-                System.Diagnostics.Debug.WriteLine("UpdateMediaElement: Добавлен textOverlayGrid в Grid");
-            }
-            else
-            {
-                System.Diagnostics.Debug.WriteLine("UpdateMediaElement: textOverlayGrid уже присутствует в Grid");
-            }
-            
-            // Делаем textOverlayGrid невидимым если в нем нет текста
-            if (textOverlayGrid.Children.Count == 0)
-            {
-                textOverlayGrid.Visibility = Visibility.Hidden;
-                System.Diagnostics.Debug.WriteLine("UpdateMediaElement: textOverlayGrid скрыт (нет текста)");
-            }
-            else
-            {
-                textOverlayGrid.Visibility = Visibility.Visible;
-                System.Diagnostics.Debug.WriteLine($"UpdateMediaElement: textOverlayGrid видим ({textOverlayGrid.Children.Count} элементов)");
-            }
-        }
-        else
-        {
-            // Если mediaBorder.Child не Grid, создаем новый Grid
-            var newGrid = new Grid();
-            newGrid.Children.Add(mediaElement);
-            newGrid.Children.Add(textOverlayGrid);
-            mediaBorder.Child = newGrid;
-        }
+        _videoDisplayService.UpdateMediaElement(mediaElement);
     }
     
     /// <summary>
@@ -1312,11 +1284,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void RestoreMediaElement(MediaElement mediaElement)
     {
-        if (mediaBorder.Child != mediaElement)
-        {
-            UpdateMediaElement(mediaElement);
-            mediaElement.Visibility = Visibility.Visible;
-        }
+        _videoDisplayService.RestoreMediaElement(mediaElement);
     }
 
     private void LoadMediaFromSlot(MediaSlot mediaSlot)
@@ -1333,6 +1301,9 @@ public partial class MainWindow : Window
             
             // Устанавливаем что основной плеер теперь принадлежит этому слоту
             _currentMainMedia = $"Slot_{mediaSlot.Column}_{mediaSlot.Row}";
+            
+            // ВАЖНО: Устанавливаем LoadedBehavior ПЕРЕД установкой Source
+            mediaElement.LoadedBehavior = MediaState.Manual;
             
             // Обновляем медиа, сохраняя текстовые блоки
             UpdateMediaElement(mediaElement);
@@ -1941,6 +1912,38 @@ public partial class MainWindow : Window
         foreach (var slot in _projectManager.CurrentProject.MediaSlots)
         {
             UpdateSlotButton(slot.Column, slot.Row, slot.MediaPath, slot.Type);
+        }
+    }
+    
+    /// <summary>
+    /// Очищает все слоты, удаляя иконки и сбрасывая их состояние
+    /// </summary>
+    private void ClearAllSlots()
+    {
+        var bottomPanel = BottomPanel;
+        if (bottomPanel == null) return;
+        
+        // Проходим по всем колонкам
+        foreach (var child in bottomPanel.Children)
+        {
+            if (child is Grid columnGrid)
+            {
+                int gridColumn = Grid.GetColumn(columnGrid);
+                int column = gridColumn + 1; // Индексы начинаются с 1
+                
+                // Проходим по всем кнопкам в колонке
+                foreach (var button in columnGrid.Children.OfType<Button>())
+                {
+                    int buttonRow = Grid.GetRow(button);
+                    int row = buttonRow + 1; // Индексы начинаются с 1
+                    
+                    // Пропускаем триггеры (третья строка, индекс 2)
+                    if (buttonRow == 2) continue;
+                    
+                    // Очищаем слот
+                    UpdateSlotButton(column, row, "", MediaType.Video);
+                }
+            }
         }
     }
 
@@ -2809,10 +2812,33 @@ public partial class MainWindow
     // Обработчики меню File
     private void NewProject_Click(object sender, RoutedEventArgs e)
     {
+        // Останавливаем текущее воспроизведение медиа
+        _mediaControlService.StopMedia();
+        _mediaControlService.CloseMedia();
+        StopActiveAudio();
+        
+        // Очищаем состояние медиа
+        _currentMainMedia = null;
+        _currentAudioContent = null;
+        _currentVisualContent = null;
+        isVideoPlaying = false;
+        isAudioPlaying = false;
+        
+        // Очищаем медиа элементы
+        _videoDisplayService.ClearMediaElements();
+        
+        // Создаем новый проект
         _projectManager.NewProject();
-        // ЗАКОММЕНТИРОВАНО - триггеры отключены
-        // ClearAllSlots();
-        LoadPanelPositions(); // Загружаем позиции панелей по умолчанию
+        
+        // Очищаем все слоты
+        ClearAllSlots();
+        
+        // Обновляем подсветку кнопок
+        UpdateAllSlotButtonsHighlighting();
+        
+        // Загружаем позиции панелей по умолчанию
+        LoadPanelPositions();
+        
         MessageBox.Show("Новый проект создан", "Информация");
     }
 
@@ -3235,167 +3261,7 @@ public partial class MainWindow
         // Если элемент не играет - запускаем заново
         if (_selectedElementSlot.Type == MediaType.Video)
         {
-            // Сохраняем позицию текущего медиа перед переключением
-            if (_currentMainMedia != null && mediaElement.Source != null)
-            {
-                _mediaResumePositions[mediaElement.Source.LocalPath] = mediaElement.Position;
-            }
-            
-            // Для видео используем основной плеер
-            mediaElement.Stop();
-            mediaElement.Source = null;
-            
-            // Обновляем содержимое Grid, сохраняя textOverlayGrid
-            if (mediaBorder.Child is Grid mainGrid)
-            {
-                // Удаляем старые элементы
-                var oldMediaElement = mainGrid.Children.OfType<MediaElement>().FirstOrDefault();
-                if (oldMediaElement != null && oldMediaElement != mediaElement)
-                {
-                    mainGrid.Children.Remove(oldMediaElement);
-                }
-                var oldImages = mainGrid.Children.OfType<Image>().ToList();
-                foreach (var oldImage in oldImages)
-                {
-                    mainGrid.Children.Remove(oldImage);
-                }
-                
-                // Добавляем MediaElement
-                if (!mainGrid.Children.Contains(mediaElement))
-                {
-                    mainGrid.Children.Insert(0, mediaElement);
-                }
-                
-                // Убеждаемся, что textOverlayGrid остается
-                if (!mainGrid.Children.Contains(textOverlayGrid))
-                {
-                    mainGrid.Children.Add(textOverlayGrid);
-                }
-                
-                // Делаем textOverlayGrid невидимым если в нем нет текста
-                if (textOverlayGrid.Children.Count == 0)
-                {
-                    textOverlayGrid.Visibility = Visibility.Hidden;
-                }
-                else
-                {
-                    textOverlayGrid.Visibility = Visibility.Visible;
-                }
-            }
-            else
-            {
-                // Если нет Grid, создаем новый
-                var newGrid = new Grid();
-                newGrid.Children.Add(mediaElement);
-                newGrid.Children.Add(textOverlayGrid);
-                mediaBorder.Child = newGrid;
-                
-                // Делаем textOverlayGrid невидимым если в нем нет текста
-                if (textOverlayGrid.Children.Count == 0)
-                {
-                    textOverlayGrid.Visibility = Visibility.Hidden;
-                }
-                else
-                {
-                    textOverlayGrid.Visibility = Visibility.Visible;
-                }
-            }
-            
-            // Убеждаемся, что MediaElement видим и правильно настроен
-            mediaElement.Visibility = Visibility.Visible;
-            mediaElement.LoadedBehavior = MediaState.Manual;
-            
-            mediaElement.Source = new Uri(_selectedElementSlot.MediaPath);
-            _currentMainMedia = _selectedElementKey;
-            
-            // Восстанавливаем позицию после загрузки медиа
-            RoutedEventHandler? mediaOpenedHandler = null;
-            mediaOpenedHandler = (s, e) =>
-            {
-                // Отписываемся от события, чтобы избежать повторных вызовов
-                mediaElement.MediaOpened -= mediaOpenedHandler;
-                
-                // Убеждаемся, что элемент видим
-                mediaElement.Visibility = Visibility.Visible;
-                
-                if (_mediaResumePositions.TryGetValue(_selectedElementSlot.MediaPath, out var resumePosition))
-                {
-                    mediaElement.Position = resumePosition;
-                    // Синхронизируем позицию со вторым экраном
-                    if (_secondaryMediaElement != null && _secondaryMediaElement.Source != null)
-                    {
-                        try
-                        {
-                            _secondaryMediaElement.Position = resumePosition;
-                        }
-                        catch { }
-                    }
-                }
-                // Убеждаемся, что mediaBorder видим
-                mediaBorder.Visibility = Visibility.Visible;
-                
-                // Убеждаемся, что прозрачность не равна 0
-                var currentOpacity = mediaElement.Opacity;
-                if (currentOpacity <= 0)
-                {
-                    mediaElement.Opacity = 1.0;
-                    System.Diagnostics.Debug.WriteLine($"ПРЕДУПРЕЖДЕНИЕ: Прозрачность была {currentOpacity}, устанавливаем 1.0");
-                }
-                
-                System.Diagnostics.Debug.WriteLine($"ElementPlay_Click (Video): Запускаем видео, Source={mediaElement.Source?.LocalPath}, Opacity={mediaElement.Opacity}, Visibility={mediaElement.Visibility}");
-                
-                mediaElement.Play();
-                SyncPlayWithSecondaryScreen();
-                isVideoPlaying = true;
-                
-                // Применяем настройки после загрузки
-                if (_selectedElementSlot != null && !string.IsNullOrEmpty(_selectedElementKey))
-                {
-                    ApplyElementSettings(_selectedElementSlot, _selectedElementKey);
-                }
-            };
-            mediaElement.MediaOpened += mediaOpenedHandler;
-            
-            // Если медиа уже загружено, запускаем сразу
-            if (mediaElement.NaturalDuration.HasTimeSpan)
-            {
-                mediaElement.Visibility = Visibility.Visible;
-                mediaBorder.Visibility = Visibility.Visible;
-                
-                // Убеждаемся, что прозрачность не равна 0
-                var currentOpacity = mediaElement.Opacity;
-                if (currentOpacity <= 0)
-                {
-                    mediaElement.Opacity = 1.0;
-                    System.Diagnostics.Debug.WriteLine($"ПРЕДУПРЕЖДЕНИЕ: Прозрачность была {currentOpacity}, устанавливаем 1.0");
-                }
-                
-                if (_mediaResumePositions.TryGetValue(_selectedElementSlot.MediaPath, out var resumePosition))
-                {
-                    mediaElement.Position = resumePosition;
-                    // Синхронизируем позицию со вторым экраном
-                    if (_secondaryMediaElement != null && _secondaryMediaElement.Source != null)
-                    {
-                        try
-                        {
-                            _secondaryMediaElement.Position = resumePosition;
-                        }
-                        catch { }
-                    }
-                }
-                
-                System.Diagnostics.Debug.WriteLine($"ElementPlay_Click (Video): Запускаем уже загруженное видео, Source={mediaElement.Source?.LocalPath}, Opacity={mediaElement.Opacity}, Visibility={mediaElement.Visibility}");
-                
-                mediaElement.Play();
-                SyncPlayWithSecondaryScreen();
-                isVideoPlaying = true;
-                
-                // Применяем настройки после загрузки
-                if (_selectedElementSlot != null && !string.IsNullOrEmpty(_selectedElementKey))
-                {
-                    ApplyElementSettings(_selectedElementSlot, _selectedElementKey);
-                }
-            }
+            _videoDisplayService.LoadAndPlayVideo(_selectedElementSlot, _selectedElementKey);
         }
         else if (_selectedElementSlot.Type == MediaType.Image)
         {
@@ -4536,18 +4402,8 @@ public partial class MainWindow
     // Остановить текущее медиа в главном плеере
     private void StopCurrentMainMedia()
     {
-        if (mediaElement.Source != null)
-        {
-            mediaElement.Stop();
-            _currentMainMedia = null;
-            _currentVisualContent = null;
-        }
-        
-        // Останавливаем воспроизведение на дополнительном экране
-        if (_secondaryMediaElement != null)
-        {
-            _secondaryMediaElement.Stop();
-        }
+        _videoDisplayService.StopCurrentMainMedia();
+        _currentVisualContent = null;
         
         // Закрываем дополнительное окно
         CloseSecondaryScreenWindow();

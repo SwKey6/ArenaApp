@@ -44,6 +44,8 @@ namespace ArenaApp.Services
             openFileDialog.Filter = "Video files|*.mp4;*.avi;*.mov;*.wmv;*.flv;*.mkv";
             if (openFileDialog.ShowDialog() == true)
             {
+                // ВАЖНО: Устанавливаем LoadedBehavior ПЕРЕД установкой Source
+                mediaElement.LoadedBehavior = MediaState.Manual;
                 mediaElement.Source = new Uri(openFileDialog.FileName);
             }
         }

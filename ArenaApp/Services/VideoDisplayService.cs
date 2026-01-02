@@ -50,14 +50,34 @@ namespace ArenaApp.Services
             mediaElement.HorizontalAlignment = HorizontalAlignment.Center;
             mediaElement.VerticalAlignment = VerticalAlignment.Center;
             
+            // ВАЖНО: Устанавливаем видимость и прозрачность сразу
+            mediaElement.Visibility = Visibility.Visible;
+            if (mediaElement.Opacity <= 0)
+            {
+                mediaElement.Opacity = 1.0;
+            }
+            mediaBorder.Visibility = Visibility.Visible;
+            mediaBorder.Opacity = 1.0;
+            
+                // ВАЖНО: Убеждаемся, что textOverlayGrid прозрачен и не перекрывает видео
+                textOverlayGrid.Background = new SolidColorBrush(Colors.Transparent);
+                textOverlayGrid.Opacity = 1.0; // Прозрачность текста управляется отдельно
+                
+                System.Diagnostics.Debug.WriteLine($"UpdateMediaElement: Установлена видимость - mediaElement.Visibility={mediaElement.Visibility}, Opacity={mediaElement.Opacity}");
+                System.Diagnostics.Debug.WriteLine($"UpdateMediaElement: textOverlayGrid.Background={textOverlayGrid.Background}, Opacity={textOverlayGrid.Opacity}, Visibility={textOverlayGrid.Visibility}");
+            
             // Получаем Grid внутри mediaBorder (который содержит mediaElement и textOverlayGrid)
             if (mediaBorder.Child is Grid mainGrid)
             {
-                // Удаляем старый MediaElement если есть
+                // Проверяем, есть ли уже mediaElement в Grid
+                bool mediaElementInGrid = mainGrid.Children.Contains(mediaElement);
+                
+                // Удаляем старый MediaElement если есть (но не тот же самый объект)
                 var oldMediaElement = mainGrid.Children.OfType<MediaElement>().FirstOrDefault();
-                if (oldMediaElement != null)
+                if (oldMediaElement != null && oldMediaElement != mediaElement)
                 {
                     mainGrid.Children.Remove(oldMediaElement);
+                    System.Diagnostics.Debug.WriteLine($"UpdateMediaElement: Удален старый MediaElement (не тот же объект)");
                 }
                 
                 // Удаляем старые Image элементы если есть
@@ -65,10 +85,19 @@ namespace ArenaApp.Services
                 foreach (var oldImage in oldImages)
                 {
                     mainGrid.Children.Remove(oldImage);
+                    System.Diagnostics.Debug.WriteLine($"UpdateMediaElement: Удален Image элемент");
                 }
                 
-                // Добавляем новый MediaElement в начало (под текстом)
-                mainGrid.Children.Insert(0, mediaElement);
+                // Добавляем MediaElement только если его еще нет в Grid
+                if (!mediaElementInGrid)
+                {
+                    mainGrid.Children.Insert(0, mediaElement);
+                    System.Diagnostics.Debug.WriteLine($"UpdateMediaElement: Добавлен mediaElement в Grid");
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"UpdateMediaElement: mediaElement уже в Grid, не добавляем повторно");
+                }
                 
                 // Убеждаемся, что textOverlayGrid остается в Grid
                 if (!mainGrid.Children.Contains(textOverlayGrid))
@@ -82,6 +111,8 @@ namespace ArenaApp.Services
                 }
                 
                 // Делаем textOverlayGrid невидимым если в нем нет текста
+                // ВАЖНО: textOverlayGrid должен быть прозрачным, чтобы не перекрывать видео
+                textOverlayGrid.Background = new SolidColorBrush(Colors.Transparent);
                 if (textOverlayGrid.Children.Count == 0)
                 {
                     textOverlayGrid.Visibility = Visibility.Hidden;
@@ -92,6 +123,16 @@ namespace ArenaApp.Services
                     textOverlayGrid.Visibility = Visibility.Visible;
                     System.Diagnostics.Debug.WriteLine($"UpdateMediaElement: textOverlayGrid видим ({textOverlayGrid.Children.Count} элементов)");
                 }
+                
+                // Отладочная информация
+                System.Diagnostics.Debug.WriteLine($"=== UpdateMediaElement ===");
+                System.Diagnostics.Debug.WriteLine($"mediaElement.Visibility={mediaElement.Visibility}, Opacity={mediaElement.Opacity}");
+                System.Diagnostics.Debug.WriteLine($"mediaElement.Width={mediaElement.Width}, Height={mediaElement.Height}, ActualWidth={mediaElement.ActualWidth}, ActualHeight={mediaElement.ActualHeight}");
+                System.Diagnostics.Debug.WriteLine($"mediaBorder.Visibility={mediaBorder.Visibility}, Opacity={mediaBorder.Opacity}");
+                System.Diagnostics.Debug.WriteLine($"mediaBorder.ActualWidth={mediaBorder.ActualWidth}, ActualHeight={mediaBorder.ActualHeight}");
+                System.Diagnostics.Debug.WriteLine($"mediaElement в Grid: {mainGrid.Children.Contains(mediaElement)}");
+                System.Diagnostics.Debug.WriteLine($"textOverlayGrid в Grid: {mainGrid.Children.Contains(textOverlayGrid)}");
+                System.Diagnostics.Debug.WriteLine($"Дети Grid: {string.Join(", ", mainGrid.Children.Cast<UIElement>().Select(c => c.GetType().Name))}");
             }
             else
             {
@@ -100,6 +141,15 @@ namespace ArenaApp.Services
                 newGrid.Children.Add(mediaElement);
                 newGrid.Children.Add(textOverlayGrid);
                 mediaBorder.Child = newGrid;
+                
+                // Убеждаемся, что все видимо
+                mediaElement.Visibility = Visibility.Visible;
+                if (mediaElement.Opacity <= 0)
+                {
+                    mediaElement.Opacity = 1.0;
+                }
+                mediaBorder.Visibility = Visibility.Visible;
+                mediaBorder.Opacity = 1.0;
             }
         }
         
@@ -242,9 +292,27 @@ namespace ArenaApp.Services
                 }
             }
             
+            // ВАЖНО: Устанавливаем видимость mediaBorder сразу, до загрузки видео
+            mediaBorder.Visibility = Visibility.Visible;
+            mediaBorder.Opacity = 1.0; // Убеждаемся, что border непрозрачен
+            
             // Убеждаемся, что MediaElement видим и правильно настроен
             mediaElement.Visibility = Visibility.Visible;
             mediaElement.LoadedBehavior = MediaState.Manual;
+            
+            // Убеждаемся, что прозрачность mediaElement не равна 0
+            if (mediaElement.Opacity <= 0)
+            {
+                mediaElement.Opacity = 1.0;
+                System.Diagnostics.Debug.WriteLine($"LoadAndPlayVideo: Прозрачность была 0, устанавливаем 1.0");
+            }
+            
+            // ВАЖНО: Убеждаемся, что textOverlayGrid прозрачен и не перекрывает видео
+            textOverlayGrid.Background = new SolidColorBrush(Colors.Transparent);
+            textOverlayGrid.Opacity = 1.0; // Прозрачность текста управляется отдельно
+            
+            System.Diagnostics.Debug.WriteLine($"LoadAndPlayVideo: Перед загрузкой - mediaElement.Visibility={mediaElement.Visibility}, Opacity={mediaElement.Opacity}, mediaBorder.Visibility={mediaBorder.Visibility}");
+            System.Diagnostics.Debug.WriteLine($"LoadAndPlayVideo: textOverlayGrid.Background={textOverlayGrid.Background}, Opacity={textOverlayGrid.Opacity}, Visibility={textOverlayGrid.Visibility}");
             
             mediaElement.Source = new Uri(slot.MediaPath);
             SetCurrentMainMedia?.Invoke(slotKey);
@@ -277,6 +345,7 @@ namespace ArenaApp.Services
                 
                 // Убеждаемся, что mediaBorder видим
                 mediaBorder.Visibility = Visibility.Visible;
+                mediaBorder.Opacity = 1.0;
                 
                 // Убеждаемся, что прозрачность не равна 0
                 var currentOpacity = mediaElement.Opacity;
@@ -287,6 +356,17 @@ namespace ArenaApp.Services
                 }
                 
                 System.Diagnostics.Debug.WriteLine($"LoadAndPlayVideo: Запускаем видео, Source={mediaElement.Source?.LocalPath}, Opacity={mediaElement.Opacity}, Visibility={mediaElement.Visibility}");
+                System.Diagnostics.Debug.WriteLine($"LoadAndPlayVideo: mediaBorder.Visibility={mediaBorder.Visibility}, mediaBorder.Opacity={mediaBorder.Opacity}");
+                System.Diagnostics.Debug.WriteLine($"LoadAndPlayVideo: mediaElement в Grid: {((mediaBorder.Child as Grid)?.Children.Contains(mediaElement) ?? false)}");
+                
+                // Еще раз убеждаемся, что все видимо перед воспроизведением
+                mediaElement.Visibility = Visibility.Visible;
+                mediaBorder.Visibility = Visibility.Visible;
+                if (mediaElement.Opacity <= 0)
+                {
+                    mediaElement.Opacity = 1.0;
+                }
+                mediaBorder.Opacity = 1.0;
                 
                 mediaElement.Play();
                 SyncPlayWithSecondaryScreen?.Invoke();

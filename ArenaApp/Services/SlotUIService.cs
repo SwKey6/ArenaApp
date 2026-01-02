@@ -188,6 +188,51 @@ namespace ArenaApp.Services
                 }
             }
         }
+        
+        /// <summary>
+        /// Очищает все слоты, удаляя иконки и сбрасывая их состояние
+        /// </summary>
+        public void ClearAllSlots()
+        {
+            var bottomPanel = GetBottomPanel?.Invoke();
+            if (bottomPanel == null) return;
+            
+            // Проходим по всем колонкам
+            foreach (var child in bottomPanel.Children)
+            {
+                if (child is Grid columnGrid)
+                {
+                    int gridColumn = Grid.GetColumn(columnGrid);
+                    int column = gridColumn + 1; // Индексы начинаются с 1
+                    
+                    // Проходим по всем кнопкам в колонке
+                    foreach (var button in columnGrid.Children.OfType<Button>())
+                    {
+                        int buttonRow = Grid.GetRow(button);
+                        int row = buttonRow + 1; // Индексы начинаются с 1
+                        
+                        // Пропускаем триггеры (третья строка, индекс 2)
+                        if (buttonRow == 2) continue;
+                        
+                        // Очищаем слот
+                        UpdateSlotButton(column, row, "", MediaType.Video);
+                    }
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Загружает слоты проекта, обновляя кнопки
+        /// </summary>
+        public void LoadProjectSlots()
+        {
+            if (_projectManager?.CurrentProject?.MediaSlots == null) return;
+            
+            foreach (var slot in _projectManager.CurrentProject.MediaSlots)
+            {
+                UpdateSlotButton(slot.Column, slot.Row, slot.MediaPath, slot.Type);
+            }
+        }
     }
 }
 

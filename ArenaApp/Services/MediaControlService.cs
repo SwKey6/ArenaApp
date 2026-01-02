@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
@@ -26,6 +28,14 @@ namespace ArenaApp.Services
         public Func<string, TimeSpan>? GetMediaResumePosition { get; set; }
         public Action<bool>? SetIsVideoPlaying { get; set; }
         public Action<bool>? SetIsAudioPlaying { get; set; }
+        
+        // Делегаты для работы с аудио слотами
+        public Func<Dictionary<string, MediaElement>>? GetAllAudioSlots { get; set; }
+        public Func<Dictionary<string, Grid>>? GetAllAudioContainers { get; set; }
+        public Func<Grid>? GetMainContentGrid { get; set; }
+        public Action<string>? UnregisterActiveMediaFile { get; set; }
+        public Action<string?>? SetCurrentAudioContent { get; set; }
+        public Action? UpdateAllSlotButtonsHighlighting { get; set; }
         
         public void SetMediaStateService(MediaStateService service)
         {
@@ -154,6 +164,51 @@ namespace ArenaApp.Services
             
             mediaElement.Stop();
             mediaElement.Source = null;
+        }
+        
+        /// <summary>
+        /// Останавливает все активные аудио слоты
+        /// </summary>
+        public void StopActiveAudio()
+        {
+            var activeAudioSlots = GetAllAudioSlots?.Invoke();
+            var activeAudioContainers = GetAllAudioContainers?.Invoke();
+            var mainContentGrid = GetMainContentGrid?.Invoke();
+            
+            if (activeAudioSlots == null) return;
+            
+            // Останавливаем все активные аудио слоты
+            foreach (var audioSlot in activeAudioSlots.ToList())
+            {
+                // Сохраняем позицию слота перед остановкой
+                SaveSlotPosition?.Invoke(audioSlot.Key, audioSlot.Value.Position);
+                
+                // Отменяем регистрацию файла
+                if (audioSlot.Value.Source != null)
+                {
+                    UnregisterActiveMediaFile?.Invoke(audioSlot.Value.Source.LocalPath);
+                }
+                
+                audioSlot.Value.Stop();
+                audioSlot.Value.Source = null;
+            }
+            activeAudioSlots.Clear();
+            
+            // Удаляем контейнеры
+            if (activeAudioContainers != null && mainContentGrid != null)
+            {
+                foreach (var container in activeAudioContainers.ToList())
+                {
+                    mainContentGrid.Children.Remove(container.Value);
+                }
+                activeAudioContainers.Clear();
+            }
+            
+            SetCurrentAudioContent?.Invoke(null);
+            SetIsAudioPlaying?.Invoke(false);
+            
+            // Обновляем подсветку кнопок
+            UpdateAllSlotButtonsHighlighting?.Invoke();
         }
     }
 }

@@ -132,6 +132,84 @@ namespace ArenaApp.Services
             }
         }
         
+        /// <summary>
+        /// Применяет настройки текста к отображаемому элементу на основе MediaSlot
+        /// </summary>
+        public void ApplyTextSettingsFromSlot(MediaSlot slot, Grid? textOverlayGrid = null)
+        {
+            if (slot == null || slot.Type != MediaType.Text) return;
+            
+            var grid = textOverlayGrid ?? GetTextOverlayGrid?.Invoke();
+            if (grid == null) return;
+            
+            // Находим текстовый элемент в textOverlayGrid и обновляем его
+            var textElement = grid.Children.OfType<TextBlock>().FirstOrDefault();
+            if (textElement != null)
+            {
+                // Обновляем свойства текста
+                textElement.Text = slot.TextContent ?? "";
+                textElement.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(slot.FontColor ?? "White"));
+                textElement.FontFamily = new FontFamily(slot.FontFamily ?? "Arial");
+                textElement.FontSize = slot.FontSize;
+                textElement.Opacity = 1.0; // Убираем прозрачность, всегда 100%
+                
+                // Применяем ручную настройку положения
+                if (slot.UseManualPosition)
+                {
+                    textElement.Margin = new Thickness(slot.TextX, slot.TextY, 0, 0);
+                    textElement.HorizontalAlignment = HorizontalAlignment.Left;
+                    textElement.VerticalAlignment = VerticalAlignment.Top;
+                }
+                else
+                {
+                    textElement.Margin = new Thickness(0);
+                    textElement.HorizontalAlignment = HorizontalAlignment.Center;
+                    textElement.VerticalAlignment = VerticalAlignment.Center;
+                }
+                
+                // Управляем видимостью
+                textElement.Visibility = slot.IsTextVisible ? Visibility.Visible : Visibility.Hidden;
+                
+                // Обновляем видимость textOverlayGrid в зависимости от видимости текста
+                grid.Visibility = slot.IsTextVisible ? Visibility.Visible : Visibility.Hidden;
+            }
+            else
+            {
+                // Если текстовый элемент не найден, скрываем textOverlayGrid
+                grid.Visibility = Visibility.Hidden;
+            }
+            
+            // Также обновляем на втором экране если он активен
+            var secondaryWindow = GetSecondaryScreenWindow?.Invoke();
+            if (secondaryWindow?.Content is Grid secondaryGrid)
+            {
+                var secondaryTextElement = secondaryGrid.Children.OfType<TextBlock>().FirstOrDefault();
+                if (secondaryTextElement != null)
+                {
+                    secondaryTextElement.Text = slot.TextContent ?? "";
+                    secondaryTextElement.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(slot.FontColor ?? "White"));
+                    secondaryTextElement.FontFamily = new FontFamily(slot.FontFamily ?? "Arial");
+                    secondaryTextElement.FontSize = slot.FontSize;
+                    secondaryTextElement.Opacity = 1.0; // Убираем прозрачность, всегда 100%
+                    
+                    if (slot.UseManualPosition)
+                    {
+                        secondaryTextElement.Margin = new Thickness(slot.TextX, slot.TextY, 0, 0);
+                        secondaryTextElement.HorizontalAlignment = HorizontalAlignment.Left;
+                        secondaryTextElement.VerticalAlignment = VerticalAlignment.Top;
+                    }
+                    else
+                    {
+                        secondaryTextElement.Margin = new Thickness(0);
+                        secondaryTextElement.HorizontalAlignment = HorizontalAlignment.Center;
+                        secondaryTextElement.VerticalAlignment = VerticalAlignment.Center;
+                    }
+                    
+                    secondaryTextElement.Visibility = slot.IsTextVisible ? Visibility.Visible : Visibility.Hidden;
+                }
+            }
+        }
+        
         private void ApplyScaleAndRotation(FrameworkElement element, double scale, double rotation)
         {
             if (element == null) return;
@@ -143,7 +221,10 @@ namespace ArenaApp.Services
             element.RenderTransformOrigin = new Point(0.5, 0.5);
         }
         
-        private HorizontalAlignment GetHorizontalAlignmentFromPosition(string? position)
+        /// <summary>
+        /// Получает горизонтальное выравнивание из строки позиции
+        /// </summary>
+        public HorizontalAlignment GetHorizontalAlignment(string position)
         {
             return position switch
             {
@@ -153,7 +234,10 @@ namespace ArenaApp.Services
             };
         }
         
-        private VerticalAlignment GetVerticalAlignmentFromPosition(string? position)
+        /// <summary>
+        /// Получает вертикальное выравнивание из строки позиции
+        /// </summary>
+        public VerticalAlignment GetVerticalAlignment(string position)
         {
             return position switch
             {
@@ -163,7 +247,10 @@ namespace ArenaApp.Services
             };
         }
         
-        private TextAlignment GetTextAlignmentFromPosition(string? position)
+        /// <summary>
+        /// Получает выравнивание текста из строки позиции
+        /// </summary>
+        public TextAlignment GetTextAlignment(string position)
         {
             return position switch
             {
@@ -171,6 +258,21 @@ namespace ArenaApp.Services
                 "TopRight" or "CenterRight" or "BottomRight" => TextAlignment.Right,
                 _ => TextAlignment.Center
             };
+        }
+        
+        private HorizontalAlignment GetHorizontalAlignmentFromPosition(string? position)
+        {
+            return GetHorizontalAlignment(position ?? "Center");
+        }
+        
+        private VerticalAlignment GetVerticalAlignmentFromPosition(string? position)
+        {
+            return GetVerticalAlignment(position ?? "Center");
+        }
+        
+        private TextAlignment GetTextAlignmentFromPosition(string? position)
+        {
+            return GetTextAlignment(position ?? "Center");
         }
     }
 }

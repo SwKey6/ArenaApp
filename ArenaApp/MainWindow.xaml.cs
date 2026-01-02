@@ -50,6 +50,17 @@ public partial class MainWindow : Window
     private readonly Services.MediaControlService _mediaControlService = new();
     private readonly Services.TriggerPlaybackService _triggerPlaybackService = new();
     private readonly Services.VideoDisplayService _videoDisplayService = new();
+    private readonly Services.PanelPositionService _panelPositionService = new();
+    private readonly Services.MediaTypeService _mediaTypeService = new();
+    private readonly Services.ElementControlService _elementControlService = new();
+    private readonly Services.ElementSettingsService _elementSettingsService = new();
+    private readonly Services.ElementSettingsUIService _elementSettingsUIService = new();
+    private readonly Services.GlobalSettingsUIService _globalSettingsUIService = new();
+    private readonly Services.ProjectManagementService _projectManagementService = new();
+    private readonly Services.SliderService _sliderService = new();
+    private readonly Services.MenuService _menuService = new();
+    private readonly Services.ElementSettingsEventHandlerService _elementSettingsEventHandlerService = new();
+    private readonly Services.GlobalSettingsEventHandlerService _globalSettingsEventHandlerService = new();
     
     // Свойства для обратной совместимости с MediaStateService
     private string? _currentMainMedia
@@ -183,30 +194,11 @@ public partial class MainWindow : Window
     private Window? _secondaryScreenWindow = null;
     private MediaElement? _secondaryMediaElement = null;
     
-    // Перетаскивание панелей
-    private bool _isDraggingElementSettings = false;
-    private bool _isDraggingGlobalSettings = false;
-    private bool _isDraggingMediaPlayer = false;
-    private bool _isDraggingMediaCells = false;
-    
-    // Изменение размера панелей
-    private bool _isResizingElementSettingsV = false;
-    private bool _isResizingElementSettingsH = false;
-    private bool _isResizingElementSettingsD = false;
-    private bool _isResizingGlobalSettingsV = false;
-    private bool _isResizingGlobalSettingsH = false;
-    private bool _isResizingGlobalSettingsD = false;
-    private bool _isResizingMediaPlayerV = false;
-    private bool _isResizingMediaPlayerH = false;
-    private bool _isResizingMediaPlayerD = false;
-    private bool _isResizingMediaCellsV = false;
-    private bool _isResizingMediaCellsH = false;
-    private bool _isResizingMediaCellsD = false;
-    
-    // Флаг активного растягивания (блокирует перетаскивание)
-    private bool _isAnyResizingActive = false;
-    
-    private Point _lastMousePosition;
+    // Сервисы для перетаскивания панелей
+    private readonly Services.PanelDragService _elementSettingsDragService = new();
+    private readonly Services.PanelDragService _globalSettingsDragService = new();
+    private readonly Services.PanelDragService _mediaPlayerDragService = new();
+    private readonly Services.PanelDragService _mediaCellsDragService = new();
 
     public MainWindow()
     {
@@ -364,6 +356,16 @@ public partial class MainWindow : Window
         _timerService.AudioTimerUpdated += (text) => audioTimerText.Text = text;
         _timerService.AudioSliderUpdated += (value) => audioSlider.Value = value;
         
+        // Настройка SliderService
+        _sliderService.SetTimerService(_timerService);
+        _sliderService.SetMediaStateService(_mediaStateService);
+        _sliderService.GetVideoSlider = () => videoSlider;
+        _sliderService.GetMainMediaElement = () => mediaElement;
+        _sliderService.GetSecondaryMediaElement = () => _secondaryScreenService.SecondaryMediaElement ?? _secondaryMediaElement;
+        _sliderService.GetAudioSlider = () => audioSlider;
+        _sliderService.GetVideoTotalDuration = () => _videoTotalDuration;
+        _sliderService.GetAudioTotalDuration = () => _audioTotalDuration;
+        
         // Настройка SlotManager
         _slotManager.GetMediaSlot = (col, row) => _projectManager.GetMediaSlot(col, row);
         _slotManager.UpdateSlotButton = UpdateSlotButton;
@@ -423,7 +425,7 @@ public partial class MainWindow : Window
         _mediaPlayerService.TryGetAudioSlot = (slotKey) => _mediaStateService.TryGetAudioSlot(slotKey, out var element) ? element : null;
         _mediaPlayerService.TryGetAudioContainer = (slotKey) => _activeAudioContainers.TryGetValue(slotKey, out var container) ? container : null;
         _mediaPlayerService.AddAudioSlot = (slotKey, element, container) => _mediaStateService.AddAudioSlot(slotKey, element, container);
-        _mediaPlayerService.StopActiveAudio = (slotKey) => StopActiveAudio();
+        _mediaPlayerService.StopActiveAudio = (slotKey) => _mediaControlService.StopActiveAudio();
         
         _mediaPlayerService.GetTextAlignment = (position) => GetTextAlignment(position);
         _mediaPlayerService.GetVerticalAlignment = (position) => GetVerticalAlignment(position);
@@ -489,6 +491,12 @@ public partial class MainWindow : Window
         };
         _mediaControlService.SetIsVideoPlaying = (playing) => isVideoPlaying = playing;
         _mediaControlService.SetIsAudioPlaying = (playing) => isAudioPlaying = playing;
+        _mediaControlService.GetAllAudioSlots = () => _activeAudioSlots;
+        _mediaControlService.GetAllAudioContainers = () => _activeAudioContainers;
+        _mediaControlService.GetMainContentGrid = () => (Grid)Content;
+        _mediaControlService.UnregisterActiveMediaFile = (path) => UnregisterActiveMediaFile(path);
+        _mediaControlService.SetCurrentAudioContent = (value) => _currentAudioContent = value;
+        _mediaControlService.UpdateAllSlotButtonsHighlighting = () => UpdateAllSlotButtonsHighlighting();
         
         // Настройка TriggerPlaybackService
         _triggerPlaybackService.SetMediaStateService(_mediaStateService);
@@ -769,82 +777,288 @@ public partial class MainWindow : Window
             _mediaStateService.SaveMediaResumePosition(path, position);
         };
         _videoDisplayService.ApplyElementSettings = (slot, key) => ApplyElementSettings(slot, key);
+        
+        // Настройка PanelPositionService
+        _panelPositionService.GetElementSettingsPanel = () => ElementSettingsBorder;
+        _panelPositionService.GetGlobalSettingsPanel = () => GlobalSettingsBorder;
+        _panelPositionService.GetMediaPlayerPanel = () => MediaPlayerBorder;
+        _panelPositionService.GetMediaCellsPanel = () => MediaCellsBorder;
+        _panelPositionService.GetGlobalSettings = () => _projectManager?.CurrentProject?.GlobalSettings;
+        
+        // Настройка MediaTypeService
+        _mediaTypeService.GetMediaSlot = (col, row) => _projectManager.GetMediaSlot(col, row);
+        _mediaTypeService.GetCurrentVisualContent = () => _currentVisualContent;
+        _mediaTypeService.GetCurrentAudioContent = () => _currentAudioContent;
+        _mediaTypeService.GetCurrentMainMedia = () => _currentMainMedia;
+        _mediaTypeService.IsMediaFileAlreadyPlaying = (path) => IsMediaFileAlreadyPlaying(path);
+        
+        // Настройка ElementControlService
+        _elementControlService.SetMediaStateService(_mediaStateService);
+        _elementControlService.SetVideoDisplayService(_videoDisplayService);
+        _elementControlService.GetMainMediaElement = () => mediaElement;
+        _elementControlService.GetMediaBorder = () => mediaBorder;
+        _elementControlService.GetTextOverlayGrid = () => textOverlayGrid;
+        _elementControlService.GetMainContentGrid = () => (Grid)Content;
+        _elementControlService.GetDispatcher = () => Dispatcher;
+        _elementControlService.GetSecondaryMediaElement = () => _secondaryScreenService.SecondaryMediaElement ?? _secondaryMediaElement;
+        _elementControlService.GetSecondaryScreenWindow = () => _secondaryScreenService.SecondaryScreenWindow ?? _secondaryScreenWindow;
+        _elementControlService.GetCurrentMainMedia = () => _currentMainMedia;
+        _elementControlService.SetCurrentMainMedia = (value) => _currentMainMedia = value;
+        _elementControlService.GetCurrentAudioContent = () => _currentAudioContent;
+        _elementControlService.GetCurrentVisualContent = () => _currentVisualContent;
+        _elementControlService.GetIsVideoPaused = () => _isVideoPaused;
+        _elementControlService.SetIsVideoPaused = (value) => _isVideoPaused = value;
+        _elementControlService.SetIsVideoPlaying = (value) => isVideoPlaying = value;
+        _elementControlService.SetIsAudioPlaying = (value) => isAudioPlaying = value;
+        _elementControlService.TryGetAudioSlot = (slotKey) => _mediaStateService.TryGetAudioSlot(slotKey, out var element) ? element : null;
+        _elementControlService.GetAllAudioSlots = () => _activeAudioSlots;
+        _elementControlService.GetAllAudioContainers = () => _activeAudioContainers;
+        _elementControlService.GetBottomPanel = () => BottomPanel;
+        _elementControlService.GetMediaResumePosition = (path) => _mediaStateService.GetMediaResumePosition(path) ?? TimeSpan.Zero;
+        _elementControlService.SaveMediaResumePosition = (path, position) => 
+        {
+            _mediaResumePositions[path] = position;
+            _mediaStateService.SaveMediaResumePosition(path, position);
+        };
+        _elementControlService.UpdateAllSlotButtonsHighlighting = () => UpdateAllSlotButtonsHighlighting();
+        _elementControlService.ApplyTextSettings = () => ApplyTextSettings();
+        _elementControlService.SyncPlayWithSecondaryScreen = () => SyncPlayWithSecondaryScreen();
+        _elementControlService.SyncPauseWithSecondaryScreen = () => SyncPauseWithSecondaryScreen();
+        
+        // Настройка ElementSettingsService
+        _elementSettingsService.SetSettingsManager(_settingsManager);
+        _elementSettingsService.GetMainMediaElement = () => mediaElement;
+        _elementSettingsService.GetMediaBorder = () => mediaBorder;
+        _elementSettingsService.GetTextOverlayGrid = () => textOverlayGrid;
+        _elementSettingsService.GetSecondaryMediaElement = () => _secondaryScreenService.SecondaryMediaElement ?? _secondaryMediaElement;
+        _elementSettingsService.GetSecondaryScreenWindow = () => _secondaryScreenService.SecondaryScreenWindow ?? _secondaryScreenWindow;
+        _elementSettingsService.GetProjectManager = () => _projectManager;
+        _elementSettingsService.GetCurrentMainMedia = () => _currentMainMedia;
+        _elementSettingsService.GetAllAudioSlots = () => _activeAudioSlots;
+        _elementSettingsService.GetActiveSlotMedia = () => _activeSlotMedia;
+        
+        // Настройка PanelDragService для ElementSettings
+        _elementSettingsDragService.GetPanel = () => ElementSettingsBorder;
+        _elementSettingsDragService.GetWindow = () => this;
+        _elementSettingsDragService.MinWidth = 300;
+        _elementSettingsDragService.MinHeight = 200;
+        _elementSettingsDragService.UseBottomAnchor = false;
+        
+        // Настройка PanelDragService для GlobalSettings
+        _globalSettingsDragService.GetPanel = () => GlobalSettingsBorder;
+        _globalSettingsDragService.GetWindow = () => this;
+        _globalSettingsDragService.MinWidth = 300;
+        _globalSettingsDragService.MinHeight = 200;
+        _globalSettingsDragService.UseBottomAnchor = false;
+        
+        // Настройка PanelDragService для MediaPlayer
+        _mediaPlayerDragService.GetPanel = () => MediaPlayerBorder;
+        _mediaPlayerDragService.GetWindow = () => this;
+        _mediaPlayerDragService.MinWidth = 400;
+        _mediaPlayerDragService.MinHeight = 300;
+        _mediaPlayerDragService.UseBottomAnchor = false;
+        
+        // Настройка PanelDragService для MediaCells (использует Bottom anchor)
+        _mediaCellsDragService.GetPanel = () => MediaCellsBorder;
+        _mediaCellsDragService.GetWindow = () => this;
+        _mediaCellsDragService.MinWidth = 400;
+        _mediaCellsDragService.MinHeight = 200;
+        _mediaCellsDragService.UseBottomAnchor = true;
+        
+        // Настройка ElementSettingsUIService
+        _elementSettingsUIService.SetProjectManager(_projectManager);
+        _elementSettingsUIService.GetNoElementSelectedText = () => NoElementSelectedText;
+        _elementSettingsUIService.GetSettingsContentPanel = () => SettingsContentPanel;
+        _elementSettingsUIService.GetRenameElementButton = () => RenameElementButton;
+        _elementSettingsUIService.GetPreviousElementButton = () => PreviousElementButton;
+        _elementSettingsUIService.GetNextElementButton = () => NextElementButton;
+        _elementSettingsUIService.GetElementTitleText = () => ElementTitleText;
+        _elementSettingsUIService.GetSpeedSlider = () => SpeedSlider;
+        _elementSettingsUIService.GetOpacitySlider = () => OpacitySlider;
+        _elementSettingsUIService.GetVolumeSlider = () => VolumeSlider;
+        _elementSettingsUIService.GetScaleSlider = () => ScaleSlider;
+        _elementSettingsUIService.GetRotationSlider = () => RotationSlider;
+        _elementSettingsUIService.GetSpeedValueText = () => SpeedValueText;
+        _elementSettingsUIService.GetOpacityValueText = () => OpacityValueText;
+        _elementSettingsUIService.GetVolumeValueText = () => VolumeValueText;
+        _elementSettingsUIService.GetScaleValueText = () => ScaleValueText;
+        _elementSettingsUIService.GetRotationValueText = () => RotationValueText;
+        _elementSettingsUIService.GetSpeedGroupBox = () => SpeedGroupBox;
+        _elementSettingsUIService.GetOpacityGroupBox = () => OpacityGroupBox;
+        _elementSettingsUIService.GetVolumeGroupBox = () => VolumeGroupBox;
+        _elementSettingsUIService.GetTextSettingsGroupBox = () => TextSettingsGroupBox;
+        _elementSettingsUIService.GetTextColorComboBox = () => TextColorComboBox;
+        _elementSettingsUIService.GetFontFamilyComboBox = () => FontFamilyComboBox;
+        _elementSettingsUIService.GetFontSizeSlider = () => FontSizeSlider;
+        _elementSettingsUIService.GetFontSizeValueText = () => FontSizeValueText;
+        _elementSettingsUIService.GetTextContentTextBox = () => TextContentTextBox;
+        _elementSettingsUIService.GetUseManualPositionCheckBox = () => UseManualPositionCheckBox;
+        _elementSettingsUIService.GetManualPositionPanel = () => ManualPositionPanel;
+        _elementSettingsUIService.GetTextXTextBox = () => TextXTextBox;
+        _elementSettingsUIService.GetTextYTextBox = () => TextYTextBox;
+        _elementSettingsUIService.GetHideTextButton = () => HideTextButton;
+        _elementSettingsUIService.SpeedSlider_ValueChanged = SpeedSlider_ValueChanged;
+        _elementSettingsUIService.OpacitySlider_ValueChanged = OpacitySlider_ValueChanged;
+        _elementSettingsUIService.VolumeSlider_ValueChanged = VolumeSlider_ValueChanged;
+        _elementSettingsUIService.ScaleSlider_ValueChanged = ScaleSlider_ValueChanged;
+        _elementSettingsUIService.RotationSlider_ValueChanged = RotationSlider_ValueChanged;
+        _elementSettingsUIService.TextColorComboBox_SelectionChanged = TextColorComboBox_SelectionChanged;
+        _elementSettingsUIService.FontFamilyComboBox_SelectionChanged = FontFamilyComboBox_SelectionChanged;
+        _elementSettingsUIService.FontSizeSlider_ValueChanged = FontSizeSlider_ValueChanged;
+        _elementSettingsUIService.TextContentTextBox_TextChanged = TextContentTextBox_TextChanged;
+        _elementSettingsUIService.UseManualPositionCheckBox_Checked = UseManualPositionCheckBox_Checked;
+        _elementSettingsUIService.UseManualPositionCheckBox_Unchecked = UseManualPositionCheckBox_Unchecked;
+        _elementSettingsUIService.TextXTextBox_TextChanged = TextXTextBox_TextChanged;
+        _elementSettingsUIService.TextYTextBox_TextChanged = TextYTextBox_TextChanged;
+        _elementSettingsUIService.ApplyElementSettings = () => ApplyElementSettings();
+        
+        // Обновляем делегаты событий в ElementSettingsUIService для использования ElementSettingsEventHandlerService
+        _elementSettingsUIService.SpeedSlider_ValueChanged = SpeedSlider_ValueChanged;
+        _elementSettingsUIService.OpacitySlider_ValueChanged = OpacitySlider_ValueChanged;
+        _elementSettingsUIService.VolumeSlider_ValueChanged = VolumeSlider_ValueChanged;
+        _elementSettingsUIService.ScaleSlider_ValueChanged = ScaleSlider_ValueChanged;
+        _elementSettingsUIService.RotationSlider_ValueChanged = RotationSlider_ValueChanged;
+        _elementSettingsUIService.TextColorComboBox_SelectionChanged = TextColorComboBox_SelectionChanged;
+        _elementSettingsUIService.FontFamilyComboBox_SelectionChanged = FontFamilyComboBox_SelectionChanged;
+        _elementSettingsUIService.FontSizeSlider_ValueChanged = FontSizeSlider_ValueChanged;
+        _elementSettingsUIService.TextContentTextBox_TextChanged = TextContentTextBox_TextChanged;
+        _elementSettingsUIService.UseManualPositionCheckBox_Checked = UseManualPositionCheckBox_Checked;
+        _elementSettingsUIService.UseManualPositionCheckBox_Unchecked = UseManualPositionCheckBox_Unchecked;
+        
+        // Настройка GlobalSettingsUIService
+        _globalSettingsUIService.SetProjectManager(_projectManager);
+        _globalSettingsUIService.SetSettingsManager(_settingsManager);
+        _globalSettingsUIService.SetTransitionService(_transitionService);
+        _globalSettingsUIService.GetUseGlobalVolumeCheckBox = () => UseGlobalVolumeCheckBox;
+        _globalSettingsUIService.GetGlobalVolumeSlider = () => GlobalVolumeSlider;
+        _globalSettingsUIService.GetGlobalVolumeValueText = () => GlobalVolumeValueText;
+        _globalSettingsUIService.GetUseGlobalOpacityCheckBox = () => UseGlobalOpacityCheckBox;
+        _globalSettingsUIService.GetGlobalOpacitySlider = () => GlobalOpacitySlider;
+        _globalSettingsUIService.GetGlobalOpacityValueText = () => GlobalOpacityValueText;
+        _globalSettingsUIService.GetUseGlobalScaleCheckBox = () => UseGlobalScaleCheckBox;
+        _globalSettingsUIService.GetGlobalScaleSlider = () => GlobalScaleSlider;
+        _globalSettingsUIService.GetGlobalScaleValueText = () => GlobalScaleValueText;
+        _globalSettingsUIService.GetUseGlobalRotationCheckBox = () => UseGlobalRotationCheckBox;
+        _globalSettingsUIService.GetGlobalRotationSlider = () => GlobalRotationSlider;
+        _globalSettingsUIService.GetGlobalRotationValueText = () => GlobalRotationValueText;
+        _globalSettingsUIService.GetTransitionTypeComboBox = () => TransitionTypeComboBox;
+        _globalSettingsUIService.GetTransitionDurationSlider = () => TransitionDurationSlider;
+        _globalSettingsUIService.GetTransitionDurationValueText = () => TransitionDurationValueText;
+        _globalSettingsUIService.GetAutoPlayNextCheckBox = () => AutoPlayNextCheckBox;
+        _globalSettingsUIService.GetLoopPlaylistCheckBox = () => LoopPlaylistCheckBox;
+        _globalSettingsUIService.UseGlobalVolumeCheckBox_Changed = UseGlobalVolumeCheckBox_Changed;
+        _globalSettingsUIService.GlobalVolumeSlider_ValueChanged = GlobalVolumeSlider_ValueChanged;
+        _globalSettingsUIService.UseGlobalOpacityCheckBox_Changed = UseGlobalOpacityCheckBox_Changed;
+        _globalSettingsUIService.GlobalOpacitySlider_ValueChanged = GlobalOpacitySlider_ValueChanged;
+        _globalSettingsUIService.UseGlobalScaleCheckBox_Changed = UseGlobalScaleCheckBox_Changed;
+        _globalSettingsUIService.GlobalScaleSlider_ValueChanged = GlobalScaleSlider_ValueChanged;
+        _globalSettingsUIService.UseGlobalRotationCheckBox_Changed = UseGlobalRotationCheckBox_Changed;
+        _globalSettingsUIService.GlobalRotationSlider_ValueChanged = GlobalRotationSlider_ValueChanged;
+        _globalSettingsUIService.TransitionTypeComboBox_SelectionChanged = TransitionTypeComboBox_SelectionChanged;
+        _globalSettingsUIService.TransitionDurationSlider_ValueChanged = TransitionDurationSlider_ValueChanged;
+        _globalSettingsUIService.AutoPlayNextCheckBox_Changed = AutoPlayNextCheckBox_Changed;
+        _globalSettingsUIService.LoopPlaylistCheckBox_Changed = LoopPlaylistCheckBox_Changed;
+        _globalSettingsUIService.SaveProject = () => _projectManager.SaveProject();
+        _globalSettingsUIService.ApplyGlobalSettings = () => ApplyGlobalSettings();
+        _globalSettingsUIService.ApplyElementSettings = () => ApplyElementSettings();
+        
+        // Настройка ProjectManagementService
+        _projectManagementService.SetProjectManager(_projectManager);
+        _projectManagementService.SetSettingsManager(_settingsManager);
+        _projectManagementService.SetVideoDisplayService(_videoDisplayService);
+        _projectManagementService.SetMediaControlService(_mediaControlService);
+        _projectManagementService.SetPanelPositionService(_panelPositionService);
+        _projectManagementService.SetCurrentMainMedia = (value) => _currentMainMedia = value;
+        _projectManagementService.SetCurrentAudioContent = (value) => _currentAudioContent = value;
+        _projectManagementService.SetCurrentVisualContent = (value) => _currentVisualContent = value;
+        _projectManagementService.SetIsVideoPlaying = (playing) => isVideoPlaying = playing;
+        _projectManagementService.SetIsAudioPlaying = (playing) => isAudioPlaying = playing;
+        _projectManagementService.StopActiveAudio = () => StopActiveAudio();
+        _projectManagementService.ClearAllSlots = () => ClearAllSlots();
+        _projectManagementService.UpdateAllSlotButtonsHighlighting = () => UpdateAllSlotButtonsHighlighting();
+        _projectManagementService.LoadProjectSlots = () => LoadProjectSlots();
+        _projectManagementService.LoadGlobalSettings = () => LoadGlobalSettings();
+        _projectManagementService.LoadPanelPositions = () => LoadPanelPositions();
+        _projectManagementService.SavePanelPositions = () => SavePanelPositions();
+        _projectManagementService.CloseSecondaryScreenWindow = () => CloseSecondaryScreenWindow();
+        _projectManagementService.ShowMessage = (message, title) => MessageBox.Show(message, title);
+        
+        // Настройка MenuService
+        _menuService.SetDeviceManager(_deviceManager);
+        _menuService.GetScreensMenuItem = () => ScreensMenuItem;
+        _menuService.GetAudioMenuItem = () => AudioMenuItem;
+        _menuService.GetAudioOutputDevices = () => GetAudioOutputDevices();
+        _menuService.OnScreenMenuItemClick = (screenIndex) => ShowScreenSelectionDialog(screenIndex);
+        _menuService.OnAudioMenuItemClick = (deviceIndex) => ShowAudioSelectionDialog(deviceIndex);
+        
+        // Настройка GlobalSettingsEventHandlerService
+        _globalSettingsEventHandlerService.SetProjectManager(_projectManager);
+        _globalSettingsEventHandlerService.SetTransitionService(_transitionService);
+        _globalSettingsEventHandlerService.GetUseGlobalVolumeCheckBox = () => UseGlobalVolumeCheckBox;
+        _globalSettingsEventHandlerService.GetGlobalVolumeSlider = () => GlobalVolumeSlider;
+        _globalSettingsEventHandlerService.GetGlobalVolumeValueText = () => GlobalVolumeValueText;
+        _globalSettingsEventHandlerService.GetUseGlobalOpacityCheckBox = () => UseGlobalOpacityCheckBox;
+        _globalSettingsEventHandlerService.GetGlobalOpacitySlider = () => GlobalOpacitySlider;
+        _globalSettingsEventHandlerService.GetGlobalOpacityValueText = () => GlobalOpacityValueText;
+        _globalSettingsEventHandlerService.GetUseGlobalScaleCheckBox = () => UseGlobalScaleCheckBox;
+        _globalSettingsEventHandlerService.GetGlobalScaleSlider = () => GlobalScaleSlider;
+        _globalSettingsEventHandlerService.GetGlobalScaleValueText = () => GlobalScaleValueText;
+        _globalSettingsEventHandlerService.GetUseGlobalRotationCheckBox = () => UseGlobalRotationCheckBox;
+        _globalSettingsEventHandlerService.GetGlobalRotationSlider = () => GlobalRotationSlider;
+        _globalSettingsEventHandlerService.GetGlobalRotationValueText = () => GlobalRotationValueText;
+        _globalSettingsEventHandlerService.GetTransitionTypeComboBox = () => TransitionTypeComboBox;
+        _globalSettingsEventHandlerService.GetTransitionDurationSlider = () => TransitionDurationSlider;
+        _globalSettingsEventHandlerService.GetTransitionDurationValueText = () => TransitionDurationValueText;
+        _globalSettingsEventHandlerService.GetAutoPlayNextCheckBox = () => AutoPlayNextCheckBox;
+        _globalSettingsEventHandlerService.GetLoopPlaylistCheckBox = () => LoopPlaylistCheckBox;
+        _globalSettingsEventHandlerService.GetSelectedElementSlot = () => _selectedElementSlot;
+        _globalSettingsEventHandlerService.GetSelectedElementKey = () => _selectedElementKey;
+        _globalSettingsEventHandlerService.ApplyGlobalSettings = () => ApplyGlobalSettings();
+        _globalSettingsEventHandlerService.ApplyElementSettings = () => ApplyElementSettings();
+        _globalSettingsEventHandlerService.SaveProject = () => _projectManager.SaveProject();
+        
+        // Настройка ElementSettingsEventHandlerService
+        _elementSettingsEventHandlerService.GetSelectedElementSlot = () => _selectedElementSlot;
+        _elementSettingsEventHandlerService.GetSelectedElementKey = () => _selectedElementKey;
+        _elementSettingsEventHandlerService.GetSpeedSlider = () => SpeedSlider;
+        _elementSettingsEventHandlerService.GetSpeedValueText = () => SpeedValueText;
+        _elementSettingsEventHandlerService.GetOpacitySlider = () => OpacitySlider;
+        _elementSettingsEventHandlerService.GetOpacityValueText = () => OpacityValueText;
+        _elementSettingsEventHandlerService.GetVolumeSlider = () => VolumeSlider;
+        _elementSettingsEventHandlerService.GetVolumeValueText = () => VolumeValueText;
+        _elementSettingsEventHandlerService.GetScaleSlider = () => ScaleSlider;
+        _elementSettingsEventHandlerService.GetScaleValueText = () => ScaleValueText;
+        _elementSettingsEventHandlerService.GetRotationSlider = () => RotationSlider;
+        _elementSettingsEventHandlerService.GetRotationValueText = () => RotationValueText;
+        _elementSettingsEventHandlerService.GetHideTextButton = () => HideTextButton;
+        _elementSettingsEventHandlerService.GetTextColorComboBox = () => TextColorComboBox;
+        _elementSettingsEventHandlerService.GetFontFamilyComboBox = () => FontFamilyComboBox;
+        _elementSettingsEventHandlerService.GetFontSizeSlider = () => FontSizeSlider;
+        _elementSettingsEventHandlerService.GetFontSizeValueText = () => FontSizeValueText;
+        _elementSettingsEventHandlerService.GetTextContentTextBox = () => TextContentTextBox;
+        _elementSettingsEventHandlerService.GetUseManualPositionCheckBox = () => UseManualPositionCheckBox;
+        _elementSettingsEventHandlerService.GetManualPositionPanel = () => ManualPositionPanel;
+        _elementSettingsEventHandlerService.GetTextXTextBox = () => TextXTextBox;
+        _elementSettingsEventHandlerService.GetTextYTextBox = () => TextYTextBox;
+        _elementSettingsEventHandlerService.GetElementPlayButton = () => ElementPlayButton;
+        _elementSettingsEventHandlerService.ApplyElementSettings = () => ApplyElementSettings();
+        _elementSettingsEventHandlerService.ApplyTextSettings = () => ApplyTextSettings();
+        _elementSettingsEventHandlerService.UpdateElementTitle = () => UpdateElementTitle();
+        _elementSettingsEventHandlerService.PlayElement = (slot, key) => _elementControlService.PlayElement(slot, key);
+        _elementSettingsEventHandlerService.StopElement = (slot, key) => _elementControlService.StopElement(slot, key);
+        _elementSettingsEventHandlerService.RestartElement = async (slot, key) => await _elementControlService.RestartElement(slot, key);
     }
     
     // Инициализация меню экранов
     private void InitializeScreensMenu()
     {
-        try
-        {
-            ScreensMenuItem.Items.Clear();
-            
-            // Получаем реальные экраны
-            var screens = System.Windows.Forms.Screen.AllScreens;
-            
-            for (int i = 0; i < screens.Length; i++)
-            {
-                var screen = screens[i];
-                var menuItem = new System.Windows.Controls.MenuItem
-                {
-                    Header = $"Экран {i + 1}: {screen.Bounds.Width}x{screen.Bounds.Height} {(screen.Primary ? "(Основной)" : "")}",
-                    Tag = i
-                };
-                menuItem.Click += ScreenMenuItem_Click;
-                ScreensMenuItem.Items.Add(menuItem);
-            }
-            
-            if (screens.Length == 0)
-            {
-                var noScreensItem = new System.Windows.Controls.MenuItem
-                {
-                    Header = "Экраны не найдены",
-                    IsEnabled = false
-                };
-                ScreensMenuItem.Items.Add(noScreensItem);
-            }
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"Ошибка при инициализации меню экранов: {ex.Message}");
-        }
+        _menuService.InitializeScreensMenu();
     }
     
     // Инициализация меню звука
     private void InitializeAudioMenu()
     {
-        try
-        {
-            AudioMenuItem.Items.Clear();
-            
-            // Получаем все устройства вывода звука
-            var audioDevices = GetAudioOutputDevices();
-            
-            for (int i = 0; i < audioDevices.Count; i++)
-            {
-                var device = audioDevices[i];
-                var menuItem = new System.Windows.Controls.MenuItem
-                {
-                    Header = device,
-                    Tag = i
-                };
-                menuItem.Click += AudioMenuItem_Click;
-                AudioMenuItem.Items.Add(menuItem);
-            }
-            
-            if (audioDevices.Count == 0)
-            {
-                var noAudioItem = new System.Windows.Controls.MenuItem
-                {
-                    Header = "Устройства звука не найдены",
-                    IsEnabled = false
-                };
-                AudioMenuItem.Items.Add(noAudioItem);
-            }
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"Ошибка при инициализации меню звука: {ex.Message}");
-        }
+        _menuService.InitializeAudioMenu();
     }
     
     // Получение списка устройств вывода звука
@@ -876,28 +1090,10 @@ public partial class MainWindow : Window
         return devices;
     }
     
-    // Обработчик клика по экрану
-    private void ScreenMenuItem_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is System.Windows.Controls.MenuItem menuItem && menuItem.Tag is int screenIndex)
-        {
-            ShowScreenSelectionDialog(screenIndex);
-        }
-    }
-    
     // Диалог выбора экрана
     private void ShowScreenSelectionDialog(int screenIndex)
     {
         _dialogService.ShowScreenSelectionDialog(screenIndex);
-    }
-    
-    // Обработчик клика по устройству звука
-    private void AudioMenuItem_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is System.Windows.Controls.MenuItem menuItem && menuItem.Tag is int deviceIndex)
-        {
-            ShowAudioSelectionDialog(deviceIndex);
-        }
     }
     
     // Диалог выбора аудиоустройства
@@ -910,8 +1106,8 @@ public partial class MainWindow : Window
     private void EditMenuItem_SubmenuOpened(object sender, RoutedEventArgs e)
     {
         // Обновляем список экранов и аудиоустройств
-        InitializeScreensMenu();
-        InitializeAudioMenu();
+        _menuService.InitializeScreensMenu();
+        _menuService.InitializeAudioMenu();
     }
     
     // Создание окна на дополнительном экране
@@ -1165,15 +1361,6 @@ public partial class MainWindow : Window
                                 SyncPlayWithSecondaryScreen();
                                 _isVideoPaused = false;
                                 
-                                // Скрываем кнопку триггера при возобновлении
-                                // ЗАКОММЕНТИРОВАНО - триггеры отключены
-                                /*
-                                var triggerButton = FindTriggerButton(column);
-                                if (triggerButton != null)
-                                {
-                                    triggerButton.Visibility = Visibility.Hidden;
-                                }
-                                */
                             }
                             else
                             {
@@ -1182,15 +1369,6 @@ public partial class MainWindow : Window
                                 SyncPauseWithSecondaryScreen();
                                 _isVideoPaused = true;
                                 
-                                // Возвращаем кнопку триггера при паузе
-                                // ЗАКОММЕНТИРОВАНО - триггеры отключены
-                                /*
-                                var triggerButton = FindTriggerButton(column);
-                                if (triggerButton != null)
-                                {
-                                    triggerButton.Visibility = Visibility.Visible;
-                                }
-                                */
                             }
                         }
                         
@@ -1206,32 +1384,12 @@ public partial class MainWindow : Window
                                     // Аудио на паузе - возобновляем
                                     audioElement.Play();
                                     _mediaStateService.SetAudioPaused(slotKey, false);
-                                    
-                                    // Скрываем кнопку триггера при возобновлении
-                                    // ЗАКОММЕНТИРОВАНО - триггеры отключены
-                                    /*
-                                    var triggerButton = FindTriggerButton(column);
-                                    if (triggerButton != null)
-                                    {
-                                        triggerButton.Visibility = Visibility.Hidden;
-                                    }
-                                    */
                                 }
                                 else
                                 {
                                     // Аудио воспроизводится - ставим на паузу
                                     audioElement.Pause();
                                     _mediaStateService.SetAudioPaused(slotKey, true);
-                                    
-                                    // Возвращаем кнопку триггера при паузе
-                                    // ЗАКОММЕНТИРОВАНО - триггеры отключены
-                                    /*
-                                    var triggerButton = FindTriggerButton(column);
-                                    if (triggerButton != null)
-                                    {
-                                        triggerButton.Visibility = Visibility.Visible;
-                                    }
-                                    */
                                 }
                             }
                             else
@@ -1243,6 +1401,7 @@ public partial class MainWindow : Window
                     else
                     {
                         // Если этот слот не воспроизводится - запускаем его
+                        System.Diagnostics.Debug.WriteLine($"Slot_Click: Запускаем слот {column}-{row}, Type={mediaSlot.Type}, Path={mediaSlot.MediaPath}");
                         LoadMediaFromSlotSelective(mediaSlot);
                     }
                 }
@@ -1287,63 +1446,17 @@ public partial class MainWindow : Window
         _videoDisplayService.RestoreMediaElement(mediaElement);
     }
 
-    private void LoadMediaFromSlot(MediaSlot mediaSlot)
-    {
-        try
-        {
-            // Сохраняем позицию текущего медиа перед переключением на новый слот
-            if (_currentMainMedia != null && mediaElement.Source != null)
-            {
-                var currentPosition = mediaElement.Position;
-                _mediaResumePositions[mediaElement.Source.LocalPath] = currentPosition;
-                System.Diagnostics.Debug.WriteLine($"СОХРАНЕНИЕ ПОЗИЦИИ LoadMediaFromSlot: {mediaElement.Source.LocalPath} -> {currentPosition}");
-            }
-            
-            // Устанавливаем что основной плеер теперь принадлежит этому слоту
-            _currentMainMedia = $"Slot_{mediaSlot.Column}_{mediaSlot.Row}";
-            
-            // ВАЖНО: Устанавливаем LoadedBehavior ПЕРЕД установкой Source
-            mediaElement.LoadedBehavior = MediaState.Manual;
-            
-            // Обновляем медиа, сохраняя текстовые блоки
-            UpdateMediaElement(mediaElement);
-            
-            mediaElement.Source = new Uri(mediaSlot.MediaPath);
-            
-            // Восстанавливаем позицию после загрузки медиа
-            RoutedEventHandler? mediaOpenedHandler = null;
-            mediaOpenedHandler = (s, e) =>
-            {
-                // Отписываемся от события, чтобы избежать повторных вызовов
-                mediaElement.MediaOpened -= mediaOpenedHandler;
-                
-                if (_mediaResumePositions.TryGetValue(mediaSlot.MediaPath, out var resumePosition))
-                {
-                    mediaElement.Position = resumePosition;
-                    System.Diagnostics.Debug.WriteLine($"ВОССТАНОВЛЕНИЕ ПОЗИЦИИ LoadMediaFromSlot: {mediaSlot.MediaPath} -> {resumePosition}");
-                }
-                else
-                {
-                    System.Diagnostics.Debug.WriteLine($"НЕТ СОХРАНЕННОЙ ПОЗИЦИИ LoadMediaFromSlot: {mediaSlot.MediaPath}");
-                }
-            mediaElement.Play();
-            };
-            mediaElement.MediaOpened += mediaOpenedHandler;
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show($"Ошибка при загрузке медиа: {ex.Message}", "Ошибка");
-        }
-    }
-
     private async void LoadMediaFromSlotSelective(MediaSlot mediaSlot)
     {
         try
         {
+            System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: НАЧАЛО, Type={mediaSlot.Type}, Path={mediaSlot.MediaPath}");
             await _mediaPlayerService.LoadMediaFromSlotSelective(mediaSlot);
+            System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: ЗАВЕРШЕНО");
         }
         catch (Exception ex)
         {
+            System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: ОШИБКА - {ex.Message}");
             MessageBox.Show($"Ошибка при загрузке медиа: {ex.Message}", "Ошибка");
         }
     }
@@ -1439,16 +1552,7 @@ public partial class MainWindow : Window
 
     private MediaType GetMediaType(string filePath)
     {
-        string extension = System.IO.Path.GetExtension(filePath).ToLower();
-        
-        if (new[] { ".mp4", ".avi", ".mov", ".wmv", ".flv", ".mkv" }.Contains(extension))
-            return MediaType.Video;
-        else if (new[] { ".jpg", ".jpeg", ".png", ".bmp", ".gif" }.Contains(extension))
-            return MediaType.Image;
-        else if (new[] { ".mp3", ".wav", ".flac", ".aac" }.Contains(extension))
-            return MediaType.Audio;
-        
-        return MediaType.Video; // По умолчанию
+        return _mediaTypeService.GetMediaType(filePath);
     }
 
     private void UpdateSlotButton(int column, int row, string mediaPath, MediaType mediaType)
@@ -1474,22 +1578,7 @@ public partial class MainWindow : Window
     /// </summary>
     private bool IsMediaTypeCompatible(MediaType newType)
     {
-        var currentType = GetCurrentMediaType();
-        
-        // Если ничего не воспроизводится - можно запустить любой тип
-        if (currentType == null) return true;
-        
-        // Правила совместимости:
-        // - Звук + картинка = OK (параллельно)
-        // - Звук + видео = OK (параллельно)
-        // - Звук + звук = OK (замена, не параллельно)
-        // - Видео + видео = OK (замена, не параллельно)
-        // - Картинка + картинка = OK (замена, не параллельно)
-        // - Видео + изображение = OK (замена)
-        // - Изображение + видео = OK (замена)
-        
-        // Все типы совместимы - они заменяют друг друга или воспроизводятся параллельно
-        return true;
+        return _mediaTypeService.IsMediaTypeCompatible(newType);
     }
 
     /// <summary>
@@ -1497,57 +1586,7 @@ public partial class MainWindow : Window
     /// </summary>
     private MediaType? GetCurrentMediaType()
     {
-        // Проверяем визуальный контент
-        if (_currentVisualContent != null)
-        {
-            if (_currentVisualContent.StartsWith("Trigger_"))
-            {
-                // Для триггеров нужно проверить что именно воспроизводится
-                var column = int.Parse(_currentVisualContent.Replace("Trigger_", ""));
-                var slot1 = _projectManager.GetMediaSlot(column, 1);
-                var slot2 = _projectManager.GetMediaSlot(column, 2);
-                
-                // Если есть видео - возвращаем Video
-                if (slot1?.Type == MediaType.Video || slot2?.Type == MediaType.Video)
-                    return MediaType.Video;
-                // Если есть изображение - возвращаем Image
-                if (slot1?.Type == MediaType.Image || slot2?.Type == MediaType.Image)
-                    return MediaType.Image;
-            }
-            else if (_currentVisualContent.StartsWith("Slot_"))
-            {
-                // Для слотов получаем тип из проекта
-                var parts = _currentVisualContent.Replace("Slot_", "").Split('_');
-                if (parts.Length == 2 && 
-                    int.TryParse(parts[0], out int column) && 
-                    int.TryParse(parts[1], out int row))
-                {
-                    var slot = _projectManager.GetMediaSlot(column, row);
-                    return slot?.Type;
-                }
-            }
-        }
-        
-        // Проверяем аудио контент
-        if (_currentAudioContent != null)
-        {
-            if (_currentAudioContent.StartsWith("Trigger_"))
-            {
-                // Для триггеров проверяем есть ли аудио
-                var column = int.Parse(_currentAudioContent.Replace("Trigger_", ""));
-                var slot1 = _projectManager.GetMediaSlot(column, 1);
-                var slot2 = _projectManager.GetMediaSlot(column, 2);
-                
-                if (slot1?.Type == MediaType.Audio || slot2?.Type == MediaType.Audio)
-                    return MediaType.Audio;
-            }
-            else if (_currentAudioContent.StartsWith("Slot_"))
-            {
-                return MediaType.Audio; // Если активен аудио слот
-            }
-        }
-        
-        return null; // Ничего не воспроизводится
+        return _mediaTypeService.GetCurrentMediaType();
     }
 
     /// <summary>
@@ -1555,44 +1594,22 @@ public partial class MainWindow : Window
     /// </summary>
     private string GetMediaTypeName(MediaType? mediaType)
     {
-        return mediaType switch
-        {
-            MediaType.Video => "видео",
-            MediaType.Image => "изображение", 
-            MediaType.Audio => "аудио",
-            MediaType.Text => "текст",
-            _ => "неизвестный тип"
-        };
+        return _mediaTypeService.GetMediaTypeName(mediaType);
     }
 
     private TextAlignment GetTextAlignment(string position)
     {
-        return position switch
-        {
-            "TopLeft" or "CenterLeft" or "BottomLeft" => TextAlignment.Left,
-            "TopRight" or "CenterRight" or "BottomRight" => TextAlignment.Right,
-            _ => TextAlignment.Center
-        };
+        return _textBlockService.GetTextAlignment(position);
     }
 
     private VerticalAlignment GetVerticalAlignment(string position)
     {
-        return position switch
-        {
-            "TopLeft" or "TopCenter" or "TopRight" => VerticalAlignment.Top,
-            "BottomLeft" or "BottomCenter" or "BottomRight" => VerticalAlignment.Bottom,
-            _ => VerticalAlignment.Center
-        };
+        return _textBlockService.GetVerticalAlignment(position);
     }
 
     private HorizontalAlignment GetHorizontalAlignment(string position)
     {
-        return position switch
-        {
-            "TopLeft" or "CenterLeft" or "BottomLeft" => HorizontalAlignment.Left,
-            "TopRight" or "CenterRight" or "BottomRight" => HorizontalAlignment.Right,
-            _ => HorizontalAlignment.Center
-        };
+        return _textBlockService.GetHorizontalAlignment(position);
     }
 
     /// <summary>
@@ -1600,23 +1617,7 @@ public partial class MainWindow : Window
     /// </summary>
     private bool ShouldBlockMediaFile(string mediaPath, MediaType mediaType, string? currentSlotKey = null)
     {
-        // Блокируем только аудио файлы от дублирования
-        // Изображения и видео должны заменяться
-        if (mediaType == MediaType.Audio && IsMediaFileAlreadyPlaying(mediaPath))
-        {
-            // НЕ блокируем, если это тот же слот/триггер (для паузы/возобновления)
-            if (!string.IsNullOrEmpty(currentSlotKey))
-            {
-                // Проверяем, воспроизводится ли этот файл в том же слоте/триггере
-                if (_currentAudioContent == currentSlotKey || _currentMainMedia == currentSlotKey)
-                {
-                    return false; // Не блокируем, это тот же слот
-                }
-            }
-            return true;
-        }
-        
-        return false;
+        return _mediaTypeService.ShouldBlockMediaFile(mediaPath, mediaType, currentSlotKey);
     }
 
     /// <summary>
@@ -1643,276 +1644,32 @@ public partial class MainWindow : Window
         return false;
     }
 
-    /// <summary>
-    /// Умная остановка триггеров - не останавливает аудио, которое должно продолжить играть
-    /// </summary>
-    // ЗАКОММЕНТИРОВАНО - триггеры отключены
-    /*
-    private void SmartStopTriggers(int newColumn, MediaSlot? audioSlot)
-    {
-        // Проверяем, играет ли аудио в отдельном слоте ИЛИ в триггере и будет ли оно использоваться в триггере
-        bool audioWillBeReused = audioSlot != null && 
-                                IsMediaFileAlreadyPlaying(audioSlot.MediaPath) && 
-                                _currentAudioContent != null && 
-                                (_currentAudioContent.StartsWith("Slot_") || _currentAudioContent.StartsWith("Trigger_"));
-        
-        if (!audioWillBeReused)
-        {
-            // Останавливаем все активное аудио только если оно не будет переиспользовано
-            System.Diagnostics.Debug.WriteLine($"SmartStopTriggers: Останавливаем все активное аудио");
-            StopActiveAudio();
-        }
-        else
-        {
-            System.Diagnostics.Debug.WriteLine($"SmartStopTriggers: НЕ ТРОГАЕМ аудио - оно будет переиспользовано");
-        }
-        
-        var activeColumns = _triggerManager.GetActiveTriggers().Where(col => col != newColumn).ToList();
-        foreach (var activeColumn in activeColumns)
-        {
-            var otherTriggerButton = FindTriggerButton(activeColumn.Key);
-            if (otherTriggerButton != null)
-            {
-                // Если новый триггер содержит то же аудио, что и текущий - не останавливаем аудио
-                if (audioSlot != null && IsMediaFileAlreadyPlaying(audioSlot.MediaPath))
-                {
-                    // Останавливаем только визуальную часть триггера
-                    SmartStopTriggerVisual(activeColumn.Key, otherTriggerButton);
-                }
-                else
-                {
-                    // Останавливаем весь триггер
-                    // ЗАКОММЕНТИРОВАНО - триггеры отключены
-                    // StopParallelMedia(activeColumn.Key, otherTriggerButton);
-                }
-            }
-        }
-    }
 
-    /// <summary>
-    /// Останавливает только визуальную часть триггера, оставляя аудио играть
-    /// </summary>
-    private void SmartStopTriggerVisual(int column, Button triggerButton)
-    {
-        string triggerKey = $"Trigger_{column}";
-        
-        // Останавливаем только визуальную часть
-        if (_currentMainMedia == triggerKey)
-        {
-            // Сохраняем позицию и отменяем регистрацию файла
-            if (mediaElement.Source != null)
-            {
-                _mediaResumePositions[mediaElement.Source.LocalPath] = mediaElement.Position;
-                UnregisterActiveMediaFile(mediaElement.Source.LocalPath);
-            }
-            
-            mediaElement.Stop();
-            mediaElement.Source = null;
-            _currentMainMedia = null;
-            
-            // Восстанавливаем MediaElement если был заменен на Image
-            if (mediaBorder.Child != mediaElement)
-            {
-                RestoreMediaElement(mediaElement);
-                mediaElement.Visibility = Visibility.Visible;
-            }
-        }
-        
-        // Очищаем визуальный контент
-        if (_currentVisualContent == triggerKey)
-        {
-            _currentVisualContent = null;
-        }
-        
-        // НЕ останавливаем аудио - оно продолжит играть
-        
-        // Сбрасываем состояние
-        SetTriggerState(column, TriggerState.Stopped);
-        if (_activeTriggerColumn == column)
-        {
-            _activeTriggerColumn = null;
-        }
-        triggerButton.Content = "▶";
-        triggerButton.Background = Brushes.Orange;
-        
-        // Возвращаем кнопку
-        triggerButton.Visibility = Visibility.Visible;
-        
-        // Останавливаем таймеры если нет активного медиа
-        if (_currentMainMedia == null)
-        {
-            isVideoPlaying = false;
-        }
-        if (_currentAudioContent == null)
-        {
-            isAudioPlaying = false;
-        }
-    }
-
-
-    // ЗАКОММЕНТИРОВАНО - триггеры отключены
-    /*
-    private void ClearAllSlots()
-    {
-        // Останавливаем все активные воспроизведения
-        foreach (var columnState in _triggerManager.GetActiveTriggers())
-        {
-            var triggerButton = FindTriggerButton(columnState);
-            if (triggerButton != null)
-            {
-                // ЗАКОММЕНТИРОВАНО - триггеры отключены
-                // StopParallelMedia(columnState, triggerButton);
-            }
-        }
-        
-        foreach (var child in BottomPanel.Children.OfType<Grid>())
-        {
-            foreach (var button in child.Children.OfType<Button>())
-            {
-                // Проверяем, является ли кнопка триггером
-                if (button.Tag?.ToString()?.StartsWith("Trigger_") == true)
-                {
-                    // Для триггеров сбрасываем состояние
-                    button.Content = "▶";
-                    button.Background = Brushes.Orange;
-                }
-                else
-                {
-                    // Для обычных слотов сбрасываем содержимое и цвет
-                    button.Content = "Пусто";
-                    button.Background = Brushes.LightGray;
-                }
-            }
-        }
-    }
-    */
-
-    private Button? FindTriggerButton(int column)
-    {
-        foreach (var child in BottomPanel.Children.OfType<Grid>())
-        {
-            int gridColumn = Grid.GetColumn(child);
-            if (gridColumn == column - 1) // Индексы начинаются с 0
-            {
-                foreach (var button in child.Children.OfType<Button>())
-                {
-                    if (button.Tag?.ToString() == $"Trigger_{column}")
-                    {
-                        return button;
-                    }
-                }
-            }
-        }
-        return null;
-    }
-
-    // ЗАКОММЕНТИРОВАНО - триггеры отключены
-    /*
-    private void StopActiveTriggersVisualOnly()
-    {
-        // Останавливаем только визуальную часть триггеров, сохраняя аудио
-        var activeColumns = _triggerManager.GetActiveTriggers();
-        foreach (var activeColumn in activeColumns)
-        {
-            var triggerButton = FindTriggerButton(activeColumn.Key);
-            if (triggerButton != null)
-            {
-                // Останавливаем только визуальную часть, сохраняя аудио
-                SmartStopTriggerVisual(activeColumn.Key, triggerButton);
-            }
-        }
-    }
-    */
-
-    // ЗАКОММЕНТИРОВАНО - триггеры отключены
-    /*
-    private void StopActiveTriggersAndVisual()
-    {
-        // Останавливаем все триггеры
-        var activeColumns = _triggerManager.GetActiveTriggers();
-        foreach (var activeColumn in activeColumns)
-        {
-            var triggerButton = FindTriggerButton(activeColumn.Key);
-            if (triggerButton != null)
-            {
-                StopParallelMedia(activeColumn.Key, triggerButton);
-            }
-        }
-        
-        // Очищаем визуальный контент только если он не аудио
-        if (_currentVisualContent != null)
-        {
-            // Сохраняем позицию перед очисткой
-            if (mediaElement.Source != null && _currentMainMedia != null)
-            {
-                SaveSlotPosition(_currentMainMedia, mediaElement.Position);
-            }
-            
-            if (mediaBorder.Child != mediaElement)
-            {
-                RestoreMediaElement(mediaElement);
-                mediaElement.Visibility = Visibility.Visible;
-            }
-            
-            // Отменяем регистрацию файла
-            if (mediaElement.Source != null)
-            {
-                UnregisterActiveMediaFile(mediaElement.Source.LocalPath);
-            }
-            
-            // Сохраняем позицию перед остановкой
-            if (mediaElement.Source != null)
-            {
-                _mediaResumePositions[mediaElement.Source.LocalPath] = mediaElement.Position;
-            }
-            mediaElement.Stop();
-            mediaElement.Source = null;
-            _currentVisualContent = null;
-            _currentMainMedia = null;
-            isVideoPlaying = false;
-        }
-    }
-    */
-
+    // Остановить все активные аудио (используется через MediaControlService)
     private void StopActiveAudio()
     {
-        // Останавливаем все активные аудио слоты
-        foreach (var audioSlot in _activeAudioSlots.ToList())
+        _mediaControlService.StopActiveAudio();
+    }
+    
+    // Остановить аудио в слоте (используется через ElementControlService, но оставляем для обратной совместимости)
+    private void StopAudioInSlot(string slotKey)
+    {
+        if (_activeAudioSlots.TryGetValue(slotKey, out MediaElement? audioElement))
         {
-            // Сохраняем позицию слота перед остановкой
-            SaveSlotPosition(audioSlot.Key, audioSlot.Value.Position);
+            audioElement.Stop();
+            _activeAudioSlots.Remove(slotKey);
             
-            // Отменяем регистрацию файла
-            if (audioSlot.Value.Source != null)
+            if (_activeAudioContainers.TryGetValue(slotKey, out Grid? container))
             {
-                UnregisterActiveMediaFile(audioSlot.Value.Source.LocalPath);
+                BottomPanel.Children.Remove(container);
+                _activeAudioContainers.Remove(slotKey);
             }
-            
-            audioSlot.Value.Stop();
-            audioSlot.Value.Source = null;
         }
-        _activeAudioSlots.Clear();
-        
-        // Удаляем контейнеры
-        foreach (var container in _activeAudioContainers.ToList())
-        {
-            ((Grid)Content).Children.Remove(container.Value);
-        }
-        _activeAudioContainers.Clear();
-        
-        _currentAudioContent = null;
-        isAudioPlaying = false;
-        
-        // Обновляем подсветку кнопок
-        UpdateAllSlotButtonsHighlighting();
     }
 
     private void LoadProjectSlots()
     {
-        foreach (var slot in _projectManager.CurrentProject.MediaSlots)
-        {
-            UpdateSlotButton(slot.Column, slot.Row, slot.MediaPath, slot.Type);
-        }
+        _slotUIService.LoadProjectSlots();
     }
     
     /// <summary>
@@ -1920,326 +1677,9 @@ public partial class MainWindow : Window
     /// </summary>
     private void ClearAllSlots()
     {
-        var bottomPanel = BottomPanel;
-        if (bottomPanel == null) return;
-        
-        // Проходим по всем колонкам
-        foreach (var child in bottomPanel.Children)
-        {
-            if (child is Grid columnGrid)
-            {
-                int gridColumn = Grid.GetColumn(columnGrid);
-                int column = gridColumn + 1; // Индексы начинаются с 1
-                
-                // Проходим по всем кнопкам в колонке
-                foreach (var button in columnGrid.Children.OfType<Button>())
-                {
-                    int buttonRow = Grid.GetRow(button);
-                    int row = buttonRow + 1; // Индексы начинаются с 1
-                    
-                    // Пропускаем триггеры (третья строка, индекс 2)
-                    if (buttonRow == 2) continue;
-                    
-                    // Очищаем слот
-                    UpdateSlotButton(column, row, "", MediaType.Video);
-                }
-            }
-        }
+        _slotUIService.ClearAllSlots();
     }
 
-
-    // ЗАКОММЕНТИРОВАНО - триггеры отключены
-    /*
-    private void Trigger_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is Button btn)
-        {
-            string? tag = btn.Tag?.ToString();
-            if (string.IsNullOrEmpty(tag)) return;
-
-            // Парсим номер колонки из тега (например, "Trigger_3" -> 3)
-            string columnStr = tag.Replace("Trigger_", "");
-            if (int.TryParse(columnStr, out int column))
-            {
-                var currentState = GetTriggerState(column);
-                
-                // ПРОСТО: убираем кнопку, когда триггер играет
-                if (_activeTriggerColumn == column && _currentMainMedia == $"Trigger_{column}")
-                {
-                    // Играет - кнопка уже скрыта, пошел нахуй
-                    return;
-                }
-                
-                // Не играет - велком, запускаем (НЕ скрываем кнопку триггера)
-                StartParallelMedia(column, btn);
-            }
-        }
-    }
-    */
-
-    // ЗАКОММЕНТИРОВАНО - триггеры отключены
-    /*
-    private void StartParallelMedia(int column, Button triggerButton)
-    {
-        // Сразу устанавливаем активный триггер
-        _activeTriggerColumn = column;
-        _currentMainMedia = $"Trigger_{column}";
-        
-        // Получаем медиа из первой и второй строки этой колонки
-        var slot1 = _projectManager.GetMediaSlot(column, 1);
-        var slot2 = _projectManager.GetMediaSlot(column, 2);
-
-        if (slot1 == null && slot2 == null)
-        {
-            return;
-        }
-
-        // Определяем, что воспроизводить
-        MediaSlot? videoSlot = null;
-        MediaSlot? audioSlot = null;
-        MediaSlot? imageSlot = null;
-
-        if (slot1 != null)
-        {
-            switch (slot1.Type)
-            {
-                case MediaType.Video:
-                    videoSlot = slot1;
-                    break;
-                case MediaType.Audio:
-                    audioSlot = slot1;
-                    break;
-                case MediaType.Image:
-                    imageSlot = slot1;
-                    break;
-            }
-        }
-
-        if (slot2 != null)
-        {
-            switch (slot2.Type)
-            {
-                case MediaType.Video:
-                    videoSlot = slot2;
-                    break;
-                case MediaType.Audio:
-                    audioSlot = slot2;
-                    break;
-                case MediaType.Image:
-                    imageSlot = slot2;
-                    break;
-            }
-        }
-
-
-        // Умная остановка триггеров - не останавливаем аудио, которое должно продолжить играть
-        SmartStopTriggers(column, audioSlot);
-        
-        // Также останавливаем основной медиаплеер если он используется не этим триггером
-        if (_currentMainMedia != null && !_currentMainMedia.StartsWith($"Trigger_{column}"))
-        {
-            mediaElement.Stop();
-            mediaElement.Source = null;
-            _currentMainMedia = null;
-        }
-
-        // Воспроизводим комбинацию
-        if (videoSlot != null && audioSlot != null)
-        {
-            StartVideoWithAudio(column, videoSlot, audioSlot, triggerButton);
-        }
-        else if (imageSlot != null && audioSlot != null)
-        {
-            StartImageWithAudio(column, imageSlot, audioSlot, triggerButton);
-        }
-        else if (videoSlot != null)
-        {
-            StartSingleMedia(column, videoSlot, triggerButton);
-        }
-        else if (imageSlot != null)
-        {
-            StartSingleMedia(column, imageSlot, triggerButton);
-        }
-        else if (audioSlot != null)
-        {
-            StartSingleMedia(column, audioSlot, triggerButton);
-        }
-    }
-
-    private void PauseParallelMedia(int column, Button triggerButton)
-    {
-        string triggerKey = $"Trigger_{column}";
-        
-        // Приостанавливаем основной плеер и сохраняем позицию слота
-        if (_currentMainMedia == triggerKey)
-        {
-            SaveSlotPosition(triggerKey, mediaElement.Position);
-            mediaElement.Pause();
-        }
-        
-        // Приостанавливаем аудио, если есть
-        if (_activeAudioElements.ContainsKey(column))
-        {
-            SaveSlotPosition(triggerKey, _activeAudioElements[column].Position);
-            _activeAudioElements[column].Pause();
-        }
-        
-        // Обновляем состояние
-        SetTriggerState(column, TriggerState.Paused);
-        triggerButton.Content = "⏸";
-        triggerButton.Background = Brushes.Yellow;
-        
-        // Останавливаем таймеры при паузе
-        isVideoPlaying = false;
-        isAudioPlaying = false;
-    }
-
-    private void ResumeParallelMedia(int column, Button triggerButton)
-    {
-        string triggerKey = $"Trigger_{column}";
-        
-        // Возобновляем основной плеер с позиции слота
-        if (_currentMainMedia == triggerKey)
-        {
-            var slotPosition = GetSlotPosition(triggerKey);
-            if (slotPosition > TimeSpan.Zero)
-            {
-                mediaElement.Position = slotPosition;
-            }
-            mediaElement.Play();
-        }
-        
-        // Возобновляем аудио, если есть
-        if (_activeAudioElements.ContainsKey(column))
-        {
-            var ae = _activeAudioElements[column];
-            var audioSlotPosition = GetSlotPosition(triggerKey);
-            if (audioSlotPosition > TimeSpan.Zero)
-            {
-                ae.Position = audioSlotPosition;
-            }
-            ae.Play();
-        }
-        
-        // Обновляем состояние
-        SetTriggerState(column, TriggerState.Playing);
-        _activeTriggerColumn = column;
-        _lastUsedTriggerColumn = column;
-        triggerButton.Content = "⏹";
-        triggerButton.Background = Brushes.Red;
-        
-        // Обновляем подсветку всех кнопок
-        UpdateAllSlotButtonsHighlighting();
-        
-        // Запускаем таймеры при возобновлении
-        isVideoPlaying = true;
-        isAudioPlaying = true;
-    }
-
-    private void StopParallelMedia(int column, Button triggerButton)
-    {
-        string triggerKey = $"Trigger_{column}";
-        
-        // Останавливаем основной плеер только если он принадлежит этому триггеру
-        if (_currentMainMedia == triggerKey)
-        {
-            // Сохраняем позицию слота перед остановкой
-            SaveSlotPosition(triggerKey, mediaElement.Position);
-            
-            // Отменяем регистрацию файла
-            if (mediaElement.Source != null)
-            {
-                UnregisterActiveMediaFile(mediaElement.Source.LocalPath);
-            }
-            
-            mediaElement.Stop();
-            mediaElement.Source = null;
-            _currentMainMedia = null;
-            
-            // Восстанавливаем MediaElement если был заменен на Image
-            if (mediaBorder.Child != mediaElement)
-            {
-                RestoreMediaElement(mediaElement);
-                mediaElement.Visibility = Visibility.Visible;
-            }
-        }
-        
-        // Очищаем визуальный контент если он принадлежит этому триггеру
-        if (_currentVisualContent == triggerKey)
-        {
-            _currentVisualContent = null;
-        }
-        
-        // Останавливаем аудио этого триггера
-        if (_activeAudioSlots.TryGetValue(triggerKey, out var triggerAudioElement) && triggerAudioElement != null)
-        {
-            // Сохраняем позицию и отменяем регистрацию файла
-            if (triggerAudioElement.Source != null)
-            {
-                _mediaResumePositions[triggerAudioElement.Source.LocalPath] = triggerAudioElement.Position;
-                UnregisterActiveMediaFile(triggerAudioElement.Source.LocalPath);
-            }
-            
-            triggerAudioElement.Stop();
-            triggerAudioElement.Source = null;
-            _mediaStateService.RemoveAudioSlot(triggerKey);
-        }
-        
-        if (_activeAudioContainers.ContainsKey(triggerKey))
-        {
-            ((Grid)Content).Children.Remove(_activeAudioContainers[triggerKey]);
-            _activeAudioContainers.Remove(triggerKey);
-        }
-        
-        if (_currentAudioContent == triggerKey)
-        {
-            _currentAudioContent = null;
-        }
-        
-        // Останавливаем и удаляем старые элементы (для совместимости)
-        if (_activeAudioElements.ContainsKey(column))
-        {
-            // Сохраняем позицию и отменяем регистрацию файла
-            if (_activeAudioElements[column].Source != null)
-            {
-                _mediaResumePositions[_activeAudioElements[column].Source.LocalPath] = _activeAudioElements[column].Position;
-                UnregisterActiveMediaFile(_activeAudioElements[column].Source.LocalPath);
-            }
-            
-            _activeAudioElements[column].Stop();
-            _activeAudioElements[column].Source = null;
-            _activeAudioElements.Remove(column);
-        }
-        
-        if (_tempContainers.ContainsKey(column))
-        {
-            ((Grid)Content).Children.Remove(_tempContainers[column]);
-            _tempContainers.Remove(column);
-        }
-        
-        // Сбрасываем состояние
-        SetTriggerState(column, TriggerState.Stopped);
-        if (_activeTriggerColumn == column)
-        {
-            _activeTriggerColumn = null;
-        }
-        triggerButton.Content = "▶";
-        triggerButton.Background = Brushes.Orange;
-        
-        // Возвращаем кнопку
-        triggerButton.Visibility = Visibility.Visible;
-        
-        // Останавливаем таймеры если нет активного медиа
-        if (_currentMainMedia == null)
-        {
-            isVideoPlaying = false;
-        }
-        if (_currentAudioContent == null)
-        {
-            isAudioPlaying = false;
-        }
-    }
-    */
 
     private Border? FindMediaBorder()
     {
@@ -2362,15 +1802,6 @@ public partial class MainWindow : Window
                                     }
                                 }
                                 
-                                // Скрываем кнопку триггера при возобновлении
-                                // ЗАКОММЕНТИРОВАНО - триггеры отключены
-                                /*
-                                var triggerButton = FindTriggerButton(column);
-                                if (triggerButton != null)
-                                {
-                                    triggerButton.Visibility = Visibility.Hidden;
-                                }
-                                */ // Сбрасываем состояние паузы
                                 mediaElement.Play(); // Запуск с начала
                                 
                                 // Синхронизируем запуск со вторым экраном
@@ -2394,15 +1825,6 @@ public partial class MainWindow : Window
                                 audioElement.Position = TimeSpan.Zero; // Сброс позиции
                                 _audioPausedStates[slotKey] = false;
                                 
-                                // Скрываем кнопку триггера при возобновлении
-                                // ЗАКОММЕНТИРОВАНО - триггеры отключены
-                                /*
-                                var triggerButton = FindTriggerButton(column);
-                                if (triggerButton != null)
-                                {
-                                    triggerButton.Visibility = Visibility.Hidden;
-                                }
-                                */ // Сбрасываем состояние паузы
                                 audioElement.Play(); // Запуск с начала
                             }
                         }
@@ -2414,40 +1836,6 @@ public partial class MainWindow : Window
                             {
                                 Slot_Click(button, new RoutedEventArgs());
                             }
-                        }
-                    }
-                }
-            }
-            else if (tag.StartsWith("Trigger_"))
-            {
-                // Для триггеров - перезапуск параллельного воспроизведения
-                var parts = tag.Split('_');
-                if (parts.Length >= 2 && int.TryParse(parts[1], out int column))
-                {
-                    var triggerButton = FindButtonByTag(tag);
-                    if (triggerButton != null)
-                    {
-                        // Проверяем, активен ли этот триггер сейчас
-                        bool isCurrentlyActive = _activeTriggerColumn == column;
-                        
-                        if (isCurrentlyActive)
-                        {
-                            // Если это активный триггер - перезапускаем с самого начала
-                            // ЗАКОММЕНТИРОВАНО - триггеры отключены
-                // StopParallelMedia(column, triggerButton);
-                            
-                            // Сбрасываем позиции для этого триггера
-                            var triggerKey = $"Trigger_{column}";
-                            _slotPositions[triggerKey] = TimeSpan.Zero;
-                            
-                            // ЗАКОММЕНТИРОВАНО - триггеры отключены
-                            // Trigger_Click(triggerButton, new RoutedEventArgs());
-                        }
-                        else
-                        {
-                            // Если это не активный триггер - просто запускаем
-                            // ЗАКОММЕНТИРОВАНО - триггеры отключены
-                            // Trigger_Click(triggerButton, new RoutedEventArgs());
                         }
                     }
                 }
@@ -2487,15 +1875,6 @@ public partial class MainWindow : Window
                                 SyncPlayWithSecondaryScreen();
                                 _isVideoPaused = false;
                                 
-                                // Скрываем кнопку триггера при возобновлении
-                                // ЗАКОММЕНТИРОВАНО - триггеры отключены
-                                /*
-                                var triggerButton = FindTriggerButton(column);
-                                if (triggerButton != null)
-                                {
-                                    triggerButton.Visibility = Visibility.Hidden;
-                                }
-                                */
                             }
                             else
                             {
@@ -2504,15 +1883,6 @@ public partial class MainWindow : Window
                                 SyncPauseWithSecondaryScreen();
                                 _isVideoPaused = true;
                                 
-                                // Возвращаем кнопку триггера при паузе
-                                // ЗАКОММЕНТИРОВАНО - триггеры отключены
-                                /*
-                                var triggerButton = FindTriggerButton(column);
-                                if (triggerButton != null)
-                                {
-                                    triggerButton.Visibility = Visibility.Visible;
-                                }
-                                */
                             }
                         }
                         
@@ -2528,32 +1898,12 @@ public partial class MainWindow : Window
                                     // Аудио на паузе - возобновляем
                                     audioElement.Play();
                                     _mediaStateService.SetAudioPaused(slotKey, false);
-                                    
-                                    // Скрываем кнопку триггера при возобновлении
-                                    // ЗАКОММЕНТИРОВАНО - триггеры отключены
-                                    /*
-                                    var triggerButton = FindTriggerButton(column);
-                                    if (triggerButton != null)
-                                    {
-                                        triggerButton.Visibility = Visibility.Hidden;
-                                    }
-                                    */
                                 }
                                 else
                                 {
                                     // Аудио воспроизводится - ставим на паузу
                                     audioElement.Pause();
                                     _mediaStateService.SetAudioPaused(slotKey, true);
-                                    
-                                    // Возвращаем кнопку триггера при паузе
-                                    // ЗАКОММЕНТИРОВАНО - триггеры отключены
-                                    /*
-                                    var triggerButton = FindTriggerButton(column);
-                                    if (triggerButton != null)
-                                    {
-                                        triggerButton.Visibility = Visibility.Visible;
-                                    }
-                                    */
                                 }
                             }
                             else
@@ -2569,39 +1919,6 @@ public partial class MainWindow : Window
                         if (button != null)
                         {
                             Slot_Click(button, new RoutedEventArgs());
-                        }
-                    }
-                }
-            }
-            else if (tag.StartsWith("Trigger_"))
-            {
-                // Для триггеров - пауза/возобновление параллельного воспроизведения
-                var parts = tag.Split('_');
-                if (parts.Length >= 2 && int.TryParse(parts[1], out int column))
-                {
-                    var triggerButton = FindButtonByTag(tag);
-                    if (triggerButton != null)
-                    {
-                        // Проверяем, активен ли этот триггер сейчас
-                        if (_activeTriggerColumn == column)
-                        {
-                            var state = GetTriggerState(column);
-                            if (state == TriggerState.Playing)
-                            {
-                                // ЗАКОММЕНТИРОВАНО - триггеры отключены
-                                // PauseParallelMedia(column, triggerButton);
-                            }
-                            else if (state == TriggerState.Paused)
-                            {
-                                // ЗАКОММЕНТИРОВАНО - триггеры отключены
-                                // ResumeParallelMedia(column, triggerButton);
-                            }
-                        }
-                        else
-                        {
-                            // Если этот триггер не активен, запускаем его
-                            // ЗАКОММЕНТИРОВАНО - триггеры отключены
-                            // Trigger_Click(triggerButton, new RoutedEventArgs());
                         }
                     }
                 }
@@ -2665,27 +1982,6 @@ public partial class MainWindow : Window
                         }
                     }
                 }
-                else if (tag.StartsWith("Trigger_"))
-                {
-                    // Останавливаем триггер и очищаем его
-                    var parts = tag.Split('_');
-                    if (parts.Length >= 2 && int.TryParse(parts[1], out int column))
-                    {
-                        var triggerButton = FindButtonByTag(tag);
-                        if (triggerButton != null)
-                        {
-                            // ЗАКОММЕНТИРОВАНО - триггеры отключены
-                // StopParallelMedia(column, triggerButton);
-                            // Сбрасываем состояние триггера
-                            SetTriggerState(column, TriggerState.Stopped);
-                            triggerButton.Content = "▶";
-                            triggerButton.Background = Brushes.Orange;
-        
-        // Возвращаем кнопку
-        triggerButton.Visibility = Visibility.Visible;
-                        }
-                    }
-                }
             }
         }
     }
@@ -2718,49 +2014,22 @@ public partial class MainWindow : Window
     
     #region Slider Event Handlers
     
-    
     /// <summary>
     /// Обработчик изменения значения слайдера видео
     /// </summary>
     private void VideoSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        // НЕ ТРОГАЕМ ВИДЕО во время перетаскивания - это создает кашу в звуке и покадровую съемку!
-        // Позиция будет установлена только при отпускании слайдера
+        _sliderService.OnVideoSliderValueChanged(sender, e);
     }
 
     private void VideoSlider_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        _timerService.IsVideoSliderDragging = true;
+        _sliderService.OnVideoSliderMouseLeftButtonDown(sender, e);
     }
     
     private void VideoSlider_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        _timerService.IsVideoSliderDragging = false;
-        
-        // Устанавливаем позицию при отпускании слайдера
-        if (_videoTotalDuration.TotalSeconds > 0)
-        {
-            var newPosition = TimeSpan.FromSeconds((videoSlider.Value / 100.0) * _videoTotalDuration.TotalSeconds);
-            
-            if (mediaElement.NaturalDuration.HasTimeSpan && mediaElement.NaturalDuration.TimeSpan.TotalSeconds > 0)
-            {
-                mediaElement.Position = newPosition;
-                
-                // Синхронизируем позицию со вторым экраном
-                if (_secondaryMediaElement != null && _secondaryMediaElement.Source != null)
-                {
-                    try
-                    {
-                        _secondaryMediaElement.Position = newPosition;
-                        System.Diagnostics.Debug.WriteLine($"СИНХРОНИЗАЦИЯ ПОЗИЦИИ ПРИ ПЕРЕМОТКЕ: {newPosition}");
-                    }
-                    catch (Exception ex)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"Ошибка синхронизации позиции со вторым экраном: {ex.Message}");
-                    }
-                }
-            }
-        }
+        _sliderService.OnVideoSliderMouseLeftButtonUp(sender, e);
     }
     
     /// <summary>
@@ -2768,7 +2037,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void AudioSlider_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        _isAudioSliderDragging = true;
+        _sliderService.OnAudioSliderMouseLeftButtonDown(sender, e);
     }
     
     /// <summary>
@@ -2776,7 +2045,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void AudioSlider_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        _isAudioSliderDragging = false;
+        _sliderService.OnAudioSliderMouseLeftButtonUp(sender, e);
     }
     
     /// <summary>
@@ -2784,19 +2053,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void AudioSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        if (_timerService.IsAudioSliderDragging && 
-            _mediaStateService.CurrentAudioContent != null && 
-            _mediaStateService.TryGetAudioSlot(_mediaStateService.CurrentAudioContent, out var audioElement))
-        {
-            var newPosition = TimeSpan.FromSeconds((e.NewValue / 100.0) * _audioTotalDuration.TotalSeconds);
-            
-            // Проверяем, что аудио загружено и готово к воспроизведению
-            if (audioElement != null && audioElement.NaturalDuration.HasTimeSpan && audioElement.NaturalDuration.TimeSpan.TotalSeconds > 0)
-            {
-                // Устанавливаем позицию немедленно без задержки для мгновенной перемотки
-                audioElement.Position = newPosition;
-            }
-        }
+        _sliderService.OnAudioSliderValueChanged(sender, e);
     }
     
     #endregion
@@ -2812,54 +2069,17 @@ public partial class MainWindow
     // Обработчики меню File
     private void NewProject_Click(object sender, RoutedEventArgs e)
     {
-        // Останавливаем текущее воспроизведение медиа
-        _mediaControlService.StopMedia();
-        _mediaControlService.CloseMedia();
-        StopActiveAudio();
-        
-        // Очищаем состояние медиа
-        _currentMainMedia = null;
-        _currentAudioContent = null;
-        _currentVisualContent = null;
-        isVideoPlaying = false;
-        isAudioPlaying = false;
-        
-        // Очищаем медиа элементы
-        _videoDisplayService.ClearMediaElements();
-        
-        // Создаем новый проект
-        _projectManager.NewProject();
-        
-        // Очищаем все слоты
-        ClearAllSlots();
-        
-        // Обновляем подсветку кнопок
-        UpdateAllSlotButtonsHighlighting();
-        
-        // Загружаем позиции панелей по умолчанию
-        LoadPanelPositions();
-        
-        MessageBox.Show("Новый проект создан", "Информация");
+        _projectManagementService.NewProject();
     }
 
     private void OpenProject_Click(object sender, RoutedEventArgs e)
     {
-        if (_projectManager.OpenProject())
-        {
-            LoadProjectSlots();
-            LoadGlobalSettings();
-            LoadPanelPositions(); // Загружаем сохраненные позиции панелей
-            MessageBox.Show("Проект загружен", "Информация");
-        }
+        _projectManagementService.OpenProject();
     }
 
     private void SaveProject_Click(object sender, RoutedEventArgs e)
     {
-        SavePanelPositions(); // Сохраняем текущие позиции панелей
-        if (_projectManager.SaveProject())
-        {
-            MessageBox.Show("Проект сохранен", "Информация");
-        }
+        _projectManagementService.SaveProject();
     }
 
     private void Exit_Click(object sender, RoutedEventArgs e)
@@ -2869,206 +2089,105 @@ public partial class MainWindow
     
     private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
     {
-        // Сохраняем позиции панелей перед закрытием
-        SavePanelPositions();
-        
-        // Закрываем окно вывода на второй монитор при закрытии приложения
-        CloseSecondaryScreenWindow();
+        _projectManagementService.OnWindowClosing();
     }
     
     
     // Событие handlers для панели настроек элемента
     private void SpeedSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        if (_selectedElementSlot == null) return;
-        
-        _selectedElementSlot.PlaybackSpeed = SpeedSlider.Value;
-        SpeedValueText.Text = $"Скорость: {SpeedSlider.Value:F1}x";
-        
-        // Применяем настройки только если слайдер не перетаскивается
-        if (!SpeedSlider.IsMouseCaptured)
-        {
-            ApplyElementSettings();
-        }
+        _elementSettingsEventHandlerService.OnSpeedSliderValueChanged(sender, e);
     }
     
     private void SpeedSlider_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        // Применяем настройки после окончания перетаскивания
-        if (_selectedElementSlot != null)
-        {
-            ApplyElementSettings();
-        }
+        _elementSettingsEventHandlerService.OnSpeedSliderMouseLeftButtonUp(sender, e);
     }
 
     private void SpeedPreset_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button button && double.TryParse(button.Tag.ToString(), out double speed))
-        {
-            SpeedSlider.Value = speed;
-        }
+        _elementSettingsEventHandlerService.OnSpeedPresetClick(sender, e);
     }
     
     private void OpacitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        if (_selectedElementSlot == null) return;
-        
-        _selectedElementSlot.Opacity = OpacitySlider.Value;
-        OpacityValueText.Text = $"Прозрачность: {(OpacitySlider.Value * 100):F0}%";
-        ApplyElementSettings();
+        _elementSettingsEventHandlerService.OnOpacitySliderValueChanged(sender, e);
     }
     
     private void VolumeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        if (_selectedElementSlot == null) return;
-        
-        _selectedElementSlot.Volume = VolumeSlider.Value;
-        VolumeValueText.Text = $"Звук: {(VolumeSlider.Value * 100):F0}%";
-        ApplyElementSettings();
+        _elementSettingsEventHandlerService.OnVolumeSliderValueChanged(sender, e);
     }
     
     private void VolumePreset_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button button && double.TryParse(button.Tag.ToString(), out double volume))
-        {
-            VolumeSlider.Value = volume;
-        }
+        _elementSettingsEventHandlerService.OnVolumePresetClick(sender, e);
     }
     
     private void ScaleSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        if (_selectedElementSlot == null) return;
-        
-        _selectedElementSlot.Scale = ScaleSlider.Value;
-        ScaleValueText.Text = $"Масштаб: {(ScaleSlider.Value * 100):F0}%";
-        ApplyElementSettings();
+        _elementSettingsEventHandlerService.OnScaleSliderValueChanged(sender, e);
     }
     
     private void ScalePreset_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button button && double.TryParse(button.Tag.ToString(), out double scale))
-        {
-            ScaleSlider.Value = scale;
-        }
+        _elementSettingsEventHandlerService.OnScalePresetClick(sender, e);
     }
     
     private void RotationSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        if (_selectedElementSlot == null) return;
-        
-        _selectedElementSlot.Rotation = RotationSlider.Value;
-        RotationValueText.Text = $"Поворот: {RotationSlider.Value:F0}°";
-        ApplyElementSettings();
+        _elementSettingsEventHandlerService.OnRotationSliderValueChanged(sender, e);
     }
     
     private void RotationPreset_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button button && double.TryParse(button.Tag.ToString(), out double rotation))
-        {
-            RotationSlider.Value = rotation;
-        }
+        _elementSettingsEventHandlerService.OnRotationPresetClick(sender, e);
     }
     
     // Обработчики для настроек текста
     private void HideTextButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_selectedElementSlot == null || _selectedElementSlot.Type != MediaType.Text) return;
-        
-        _selectedElementSlot.IsTextVisible = !_selectedElementSlot.IsTextVisible;
-        
-        // Обновляем кнопку
-        if (_selectedElementSlot.IsTextVisible)
-        {
-            HideTextButton.Content = "👁️ Скрыть текст";
-            HideTextButton.Background = new SolidColorBrush(Color.FromRgb(244, 67, 54)); // Красный
-        }
-        else
-        {
-            HideTextButton.Content = "👁️ Показать текст";
-            HideTextButton.Background = new SolidColorBrush(Color.FromRgb(76, 175, 80)); // Зеленый
-        }
-        
-        // Применяем изменения к отображаемому тексту
-        ApplyTextSettings();
+        _elementSettingsEventHandlerService.OnHideTextButtonClick(sender, e);
     }
     
     private void TextColorComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_selectedElementSlot == null || _selectedElementSlot.Type != MediaType.Text) return;
-        
-        if (TextColorComboBox.SelectedItem is ComboBoxItem selectedItem)
-        {
-            _selectedElementSlot.FontColor = selectedItem.Tag?.ToString() ?? "White";
-            ApplyTextSettings();
-        }
+        _elementSettingsEventHandlerService.OnTextColorComboBoxSelectionChanged(sender, e);
     }
     
     private void FontFamilyComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_selectedElementSlot == null || _selectedElementSlot.Type != MediaType.Text) return;
-        
-        if (FontFamilyComboBox.SelectedItem is ComboBoxItem selectedItem)
-        {
-            _selectedElementSlot.FontFamily = selectedItem.Tag?.ToString() ?? "Arial";
-            ApplyTextSettings();
-        }
+        _elementSettingsEventHandlerService.OnFontFamilyComboBoxSelectionChanged(sender, e);
     }
     
     private void FontSizeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        if (_selectedElementSlot == null || _selectedElementSlot.Type != MediaType.Text) return;
-        
-        _selectedElementSlot.FontSize = FontSizeSlider.Value;
-        FontSizeValueText.Text = $"{FontSizeSlider.Value:F0}px";
-        ApplyTextSettings();
+        _elementSettingsEventHandlerService.OnFontSizeSliderValueChanged(sender, e);
     }
     
     private void TextContentTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
-        if (_selectedElementSlot == null || _selectedElementSlot.Type != MediaType.Text) return;
-        
-        _selectedElementSlot.TextContent = TextContentTextBox.Text;
-        ApplyTextSettings();
+        _elementSettingsEventHandlerService.OnTextContentTextBoxTextChanged(sender, e);
     }
     
     private void UseManualPositionCheckBox_Checked(object sender, RoutedEventArgs e)
     {
-        if (_selectedElementSlot == null || _selectedElementSlot.Type != MediaType.Text) return;
-        
-        _selectedElementSlot.UseManualPosition = true;
-        ManualPositionPanel.Visibility = Visibility.Visible;
-        ApplyTextSettings();
+        _elementSettingsEventHandlerService.OnUseManualPositionCheckBoxChecked(sender, e);
     }
     
     private void UseManualPositionCheckBox_Unchecked(object sender, RoutedEventArgs e)
     {
-        if (_selectedElementSlot == null || _selectedElementSlot.Type != MediaType.Text) return;
-        
-        _selectedElementSlot.UseManualPosition = false;
-        ManualPositionPanel.Visibility = Visibility.Collapsed;
-        ApplyTextSettings();
+        _elementSettingsEventHandlerService.OnUseManualPositionCheckBoxUnchecked(sender, e);
     }
     
     private void TextXTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
-        if (_selectedElementSlot == null || _selectedElementSlot.Type != MediaType.Text) return;
-        
-        if (double.TryParse(TextXTextBox.Text, out double x))
-        {
-            _selectedElementSlot.TextX = x;
-            ApplyTextSettings();
-        }
+        _elementSettingsEventHandlerService.OnTextXTextBoxTextChanged(sender, e);
     }
     
     private void TextYTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
-        if (_selectedElementSlot == null || _selectedElementSlot.Type != MediaType.Text) return;
-        
-        if (double.TryParse(TextYTextBox.Text, out double y))
-        {
-            _selectedElementSlot.TextY = y;
-            ApplyTextSettings();
-        }
+        _elementSettingsEventHandlerService.OnTextYTextBoxTextChanged(sender, e);
     }
     
     // Применить настройки текста к отображаемому элементу
@@ -3076,347 +2195,22 @@ public partial class MainWindow
     {
         if (_selectedElementSlot == null || _selectedElementSlot.Type != MediaType.Text) return;
         
-        // Находим текстовый элемент в textOverlayGrid и обновляем его
-        System.Diagnostics.Debug.WriteLine($"ApplyTextSettings: Ищем текстовый элемент в textOverlayGrid. Детей в Grid: {textOverlayGrid.Children.Count}");
-        var textElement = textOverlayGrid.Children.OfType<TextBlock>().FirstOrDefault();
-        if (textElement != null)
-        {
-            System.Diagnostics.Debug.WriteLine($"ApplyTextSettings: Найден текстовый элемент с текстом: '{textElement.Text}'");
-            // Обновляем свойства текста
-            textElement.Text = _selectedElementSlot.TextContent ?? "";
-            textElement.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(_selectedElementSlot.FontColor));
-            textElement.FontFamily = new FontFamily(_selectedElementSlot.FontFamily);
-            textElement.FontSize = _selectedElementSlot.FontSize;
-            textElement.Opacity = 1.0; // Убираем прозрачность, всегда 100%
-            
-            // Применяем ручную настройку положения
-            if (_selectedElementSlot.UseManualPosition)
-            {
-                textElement.Margin = new Thickness(_selectedElementSlot.TextX, _selectedElementSlot.TextY, 0, 0);
-                textElement.HorizontalAlignment = HorizontalAlignment.Left;
-                textElement.VerticalAlignment = VerticalAlignment.Top;
-            }
-            else
-            {
-                textElement.Margin = new Thickness(0);
-                textElement.HorizontalAlignment = HorizontalAlignment.Center;
-                textElement.VerticalAlignment = VerticalAlignment.Center;
-            }
-            
-            // Управляем видимостью
-            textElement.Visibility = _selectedElementSlot.IsTextVisible ? Visibility.Visible : Visibility.Hidden;
-            
-            // Обновляем видимость textOverlayGrid в зависимости от видимости текста
-            textOverlayGrid.Visibility = _selectedElementSlot.IsTextVisible ? Visibility.Visible : Visibility.Hidden;
-        }
-        else
-        {
-            System.Diagnostics.Debug.WriteLine("ApplyTextSettings: Текстовый элемент НЕ найден в textOverlayGrid!");
-            
-            // Если текстовый элемент не найден, скрываем textOverlayGrid
-            textOverlayGrid.Visibility = Visibility.Hidden;
-        }
-        
-        // Также обновляем на втором экране если он активен
-        if (_secondaryScreenWindow != null && _secondaryScreenWindow.Content is Grid secondaryGrid)
-        {
-            var secondaryTextElement = secondaryGrid.Children.OfType<TextBlock>().FirstOrDefault();
-            if (secondaryTextElement != null)
-            {
-                secondaryTextElement.Text = _selectedElementSlot.TextContent ?? "";
-                secondaryTextElement.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(_selectedElementSlot.FontColor));
-                secondaryTextElement.FontFamily = new FontFamily(_selectedElementSlot.FontFamily);
-                secondaryTextElement.FontSize = _selectedElementSlot.FontSize;
-                secondaryTextElement.Opacity = 1.0; // Убираем прозрачность, всегда 100%
-                
-                if (_selectedElementSlot.UseManualPosition)
-                {
-                    secondaryTextElement.Margin = new Thickness(_selectedElementSlot.TextX, _selectedElementSlot.TextY, 0, 0);
-                    secondaryTextElement.HorizontalAlignment = HorizontalAlignment.Left;
-                    secondaryTextElement.VerticalAlignment = VerticalAlignment.Top;
-                }
-                else
-                {
-                    secondaryTextElement.Margin = new Thickness(0);
-                    secondaryTextElement.HorizontalAlignment = HorizontalAlignment.Center;
-                    secondaryTextElement.VerticalAlignment = VerticalAlignment.Center;
-                }
-                
-                secondaryTextElement.Visibility = _selectedElementSlot.IsTextVisible ? Visibility.Visible : Visibility.Hidden;
-            }
-        }
+        _textBlockService.ApplyTextSettingsFromSlot(_selectedElementSlot, textOverlayGrid);
     }
     
     public void ElementPlay_Click(object sender, RoutedEventArgs e)
     {
-        if (_selectedElementSlot == null || string.IsNullOrEmpty(_selectedElementKey)) return;
-        
-        // Проверяем, играет ли уже этот элемент
-        bool isCurrentlyPlaying = false;
-        bool isCurrentlyPaused = false;
-        
-        if (_selectedElementSlot.Type == MediaType.Video || _selectedElementSlot.Type == MediaType.Image)
-        {
-            // Для видео/изображения проверяем основной плеер
-            isCurrentlyPlaying = _currentMainMedia == _selectedElementKey && mediaElement.Source != null;
-            isCurrentlyPaused = isCurrentlyPlaying && !isVideoPlaying;
-        }
-        else if (_selectedElementSlot.Type == MediaType.Audio)
-        {
-            // Для аудио проверяем активные аудио слоты
-            if (_activeAudioSlots.TryGetValue(_selectedElementKey, out MediaElement? audioElement))
-            {
-                isCurrentlyPlaying = _currentAudioContent == _selectedElementKey;
-                isCurrentlyPaused = isCurrentlyPlaying && !isAudioPlaying;
-            }
-        }
-        else if (_selectedElementSlot.Type == MediaType.Text)
-        {
-            // Для текстовых элементов проверяем основной плеер
-            isCurrentlyPlaying = _currentMainMedia == _selectedElementKey;
-            isCurrentlyPaused = false; // Текстовые элементы не имеют состояния паузы
-        }
-        
-        // Если элемент уже играет - ставим на паузу/возобновляем
-        if (isCurrentlyPlaying)
-        {
-            if (isCurrentlyPaused)
-            {
-                // Возобновляем воспроизведение с сохраненной позиции
-                if (_selectedElementSlot.Type == MediaType.Video || _selectedElementSlot.Type == MediaType.Image)
-                {
-                    // Восстанавливаем позицию из сохраненных позиций
-                    if (mediaElement.Source != null && _mediaResumePositions.TryGetValue(mediaElement.Source.LocalPath, out var resume))
-                    {
-                        mediaElement.Position = resume;
-                        // Синхронизируем позицию со вторым экраном
-                        if (_secondaryMediaElement != null && _secondaryMediaElement.Source != null)
-                        {
-                            try
-                            {
-                                _secondaryMediaElement.Position = resume;
-                            }
-                            catch { }
-                        }
-                    }
-                    mediaElement.Play();
-                    SyncPlayWithSecondaryScreen();
-                    isVideoPlaying = true;
-                }
-                else if (_selectedElementSlot.Type == MediaType.Audio && _activeAudioSlots.TryGetValue(_selectedElementKey, out MediaElement? audioElement))
-                {
-                    // Восстанавливаем позицию из сохраненных позиций
-                    if (audioElement.Source != null && _mediaResumePositions.TryGetValue(audioElement.Source.LocalPath, out var audioResume))
-                    {
-                        audioElement.Position = audioResume;
-                    }
-                    audioElement.Play();
-                    isAudioPlaying = true;
-                }
-                else if (_selectedElementSlot.Type == MediaType.Text)
-                {
-                    // Для текстовых элементов просто применяем настройки
-                    ApplyTextSettings();
-                }
-                ElementPlayButton.Content = "⏸️";
-                ElementPlayButton.ToolTip = "Пауза";
-                UpdateAllSlotButtonsHighlighting();
-            }
-            else
-            {
-                // Ставим на паузу и сохраняем позицию
-                if (_selectedElementSlot.Type == MediaType.Video || _selectedElementSlot.Type == MediaType.Image)
-                {
-                    // Сохраняем позицию перед паузой
-                    if (mediaElement.Source != null)
-                    {
-                        _mediaResumePositions[mediaElement.Source.LocalPath] = mediaElement.Position;
-                    }
-                    mediaElement.Pause();
-                    SyncPauseWithSecondaryScreen();
-                    isVideoPlaying = false;
-                }
-                else if (_selectedElementSlot.Type == MediaType.Audio && _activeAudioSlots.TryGetValue(_selectedElementKey, out MediaElement? audioElement))
-                {
-                    // Сохраняем позицию перед паузой
-                    if (audioElement.Source != null)
-                    {
-                        _mediaResumePositions[audioElement.Source.LocalPath] = audioElement.Position;
-                    }
-                    audioElement.Pause();
-                    isAudioPlaying = false;
-                }
-                else if (_selectedElementSlot.Type == MediaType.Text)
-                {
-                    // Для текстовых элементов ничего не делаем при "паузе"
-                    // Текст остается видимым
-                }
-                ElementPlayButton.Content = "▶️";
-                ElementPlayButton.ToolTip = "Продолжить";
-                UpdateAllSlotButtonsHighlighting();
-            }
-            return;
-        }
-        
-        // Если элемент не играет - запускаем заново
-        if (_selectedElementSlot.Type == MediaType.Video)
-        {
-            _videoDisplayService.LoadAndPlayVideo(_selectedElementSlot, _selectedElementKey);
-        }
-        else if (_selectedElementSlot.Type == MediaType.Image)
-        {
-            // Для изображения заменяем MediaElement на Image
-            mediaElement.Stop();
-            mediaElement.Source = null;
-            
-            // Создаем Image элемент
-            var imageElement = new Image
-            {
-                Source = new BitmapImage(new Uri(_selectedElementSlot.MediaPath)),
-                Stretch = Stretch.Uniform, // Изменено с UniformToFill на Uniform чтобы не обрезать
-                Width = 600,
-                Height = 400
-            };
-            
-            // Обновляем содержимое Grid, сохраняя textOverlayGrid
-            if (mediaBorder.Child is Grid mainGrid)
-            {
-                // Удаляем старые элементы
-                var oldMediaElement = mainGrid.Children.OfType<MediaElement>().FirstOrDefault();
-                if (oldMediaElement != null)
-                {
-                    mainGrid.Children.Remove(oldMediaElement);
-                }
-                var oldImages = mainGrid.Children.OfType<Image>().ToList();
-                foreach (var oldImage in oldImages)
-                {
-                    mainGrid.Children.Remove(oldImage);
-                }
-                
-                // Добавляем новое изображение
-                mainGrid.Children.Insert(0, imageElement);
-                
-                // Убеждаемся, что textOverlayGrid остается
-                if (!mainGrid.Children.Contains(textOverlayGrid))
-                {
-                    mainGrid.Children.Add(textOverlayGrid);
-                }
-                
-                // Делаем textOverlayGrid невидимым если в нем нет текста
-                if (textOverlayGrid.Children.Count == 0)
-                {
-                    textOverlayGrid.Visibility = Visibility.Hidden;
-                }
-                else
-                {
-                    textOverlayGrid.Visibility = Visibility.Visible;
-                }
-            }
-            else
-            {
-                // Если нет Grid, создаем новый
-                var newGrid = new Grid();
-                newGrid.Children.Add(imageElement);
-                newGrid.Children.Add(textOverlayGrid);
-                mediaBorder.Child = newGrid;
-                
-                // Делаем textOverlayGrid невидимым если в нем нет текста
-                if (textOverlayGrid.Children.Count == 0)
-                {
-                    textOverlayGrid.Visibility = Visibility.Hidden;
-                }
-                else
-                {
-                    textOverlayGrid.Visibility = Visibility.Visible;
-                }
-            }
-            
-            _currentMainMedia = _selectedElementKey;
-            isVideoPlaying = false; // Изображения не "играют"
-        }
-        else if (_selectedElementSlot.Type == MediaType.Audio)
-        {
-            // Для аудио создаем отдельный MediaElement
-            if (!_activeAudioSlots.ContainsKey(_selectedElementKey))
-            {
-                var audioElement = new MediaElement
-                {
-                    LoadedBehavior = MediaState.Manual,
-                    Source = new Uri(_selectedElementSlot.MediaPath),
-                    Volume = _selectedElementSlot.Volume,
-                    SpeedRatio = _selectedElementSlot.PlaybackSpeed
-                };
-                
-                // Создаем контейнер для аудио элемента
-                var audioContainer = new Grid
-                {
-                    Width = 1,
-                    Height = 1,
-                    Visibility = Visibility.Hidden
-                };
-                audioContainer.Children.Add(audioElement);
-                
-                BottomPanel.Children.Add(audioContainer);
-                
-                _activeAudioSlots[_selectedElementKey] = audioElement;
-                _activeAudioContainers[_selectedElementKey] = audioContainer;
-            }
-            
-            var element = _activeAudioSlots[_selectedElementKey];
-            element.Play();
-            _currentAudioContent = _selectedElementKey;
-            isAudioPlaying = true;
-        }
-        else if (_selectedElementSlot.Type == MediaType.Text)
-        {
-            // Для текстовых элементов просто устанавливаем как активное медиа
-            _currentMainMedia = _selectedElementKey;
-            
-            // Применяем настройки текста
-            ApplyTextSettings();
-        }
-        
-        // Обновляем кнопку
-        ElementPlayButton.Content = "⏸️";
-        ElementPlayButton.ToolTip = "Пауза";
-        
-        // Обновляем подсветку кнопок слотов
-        UpdateAllSlotButtonsHighlighting();
+        _elementSettingsEventHandlerService.OnElementPlayClick(sender, e);
     }
     
     private void ElementStop_Click(object sender, RoutedEventArgs e)
     {
-        if (_selectedElementSlot == null || string.IsNullOrEmpty(_selectedElementKey)) return;
-        
-        // Останавливаем выбранный элемент
-        if (_selectedElementSlot.Type == MediaType.Video || _selectedElementSlot.Type == MediaType.Image)
-        {
-            StopCurrentMainMedia();
-        }
-        else if (_selectedElementSlot.Type == MediaType.Audio)
-        {
-            StopAudioInSlot(_selectedElementKey);
-        }
-        
-        // Сбрасываем состояние кнопки "Продолжить"
-        ElementPlayButton.Content = "▶️";
-        ElementPlayButton.ToolTip = "Воспроизвести";
-        UpdateAllSlotButtonsHighlighting();
+        _elementSettingsEventHandlerService.OnElementStopClick(sender, e);
     }
     
     public void ElementRestart_Click(object sender, RoutedEventArgs e)
     {
-        if (_selectedElementSlot == null || string.IsNullOrEmpty(_selectedElementKey)) return;
-        
-        // Перезапускаем выбранный элемент
-        ElementStop_Click(sender, e);
-        
-        // Сбрасываем состояние кнопки "Продолжить"
-        ElementPlayButton.Content = "▶️";
-        ElementPlayButton.ToolTip = "Воспроизвести";
-        UpdateAllSlotButtonsHighlighting();
-        
-        Task.Delay(100).ContinueWith(_ => Dispatcher.Invoke(() => ElementPlay_Click(sender, e)));
+        _elementSettingsEventHandlerService.OnElementRestartClick(sender, e);
     }
     
     private void PreviousMediaButton_Click(object sender, RoutedEventArgs e)
@@ -3431,20 +2225,7 @@ public partial class MainWindow
     
     private void RenameElementButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_selectedElementSlot == null) return;
-        
-        // Показываем диалог переименования
-        string currentName = _selectedElementSlot.DisplayName;
-        string? newName = Microsoft.VisualBasic.Interaction.InputBox(
-            "Введите новое имя элемента:", 
-            "Переименование элемента", 
-            currentName);
-            
-        if (!string.IsNullOrWhiteSpace(newName) && newName != currentName)
-        {
-            _selectedElementSlot.DisplayName = newName;
-            UpdateElementTitle();
-        }
+        _elementSettingsEventHandlerService.OnRenameElementButtonClick(sender, e);
     }
     
     private void PreviousElementButton_Click(object sender, RoutedEventArgs e)
@@ -3470,201 +2251,77 @@ public partial class MainWindow
     // Обработчики событий для общих настроек проекта
     private void UseGlobalVolumeCheckBox_Changed(object sender, RoutedEventArgs e)
     {
-        if (_projectManager?.CurrentProject?.GlobalSettings == null) return;
-        
-        _projectManager.CurrentProject.GlobalSettings.UseGlobalVolume = UseGlobalVolumeCheckBox.IsChecked == true;
-        ApplyGlobalSettings();
-        
-        // Автоматически сохраняем проект при изменении общих настроек
-        _projectManager.SaveProject();
+        _globalSettingsEventHandlerService.OnUseGlobalVolumeCheckBoxChanged(sender, e);
     }
     
     private void GlobalVolumeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        if (_projectManager?.CurrentProject?.GlobalSettings == null) return;
-        
-        _projectManager.CurrentProject.GlobalSettings.GlobalVolume = GlobalVolumeSlider.Value;
-        GlobalVolumeValueText.Text = $"Общая громкость: {(GlobalVolumeSlider.Value * 100):F0}%";
-        ApplyGlobalSettings();
-        
-        // Автоматически сохраняем проект при изменении общих настроек
-        _projectManager.SaveProject();
+        _globalSettingsEventHandlerService.OnGlobalVolumeSliderValueChanged(sender, e);
     }
     
     private void GlobalVolumePreset_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button button && double.TryParse(button.Tag.ToString(), out double volume))
-        {
-            GlobalVolumeSlider.Value = volume;
-        }
+        _globalSettingsEventHandlerService.OnGlobalVolumePresetClick(sender, e);
     }
     
     private void UseGlobalScaleCheckBox_Changed(object sender, RoutedEventArgs e)
     {
-        if (_projectManager?.CurrentProject?.GlobalSettings == null) return;
-        
-        _projectManager.CurrentProject.GlobalSettings.UseGlobalScale = UseGlobalScaleCheckBox.IsChecked == true;
-        ApplyGlobalSettings();
-        
-        // Также применяем настройки к выбранному элементу если он есть
-        if (_selectedElementSlot != null && !string.IsNullOrEmpty(_selectedElementKey))
-        {
-            ApplyElementSettings();
-        }
-        
-        // Автоматически сохраняем проект при изменении общих настроек
-        _projectManager.SaveProject();
+        _globalSettingsEventHandlerService.OnUseGlobalScaleCheckBoxChanged(sender, e);
     }
     
     private void GlobalScaleSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        if (_projectManager?.CurrentProject?.GlobalSettings == null) return;
-        
-        _projectManager.CurrentProject.GlobalSettings.GlobalScale = GlobalScaleSlider.Value;
-        GlobalScaleValueText.Text = $"Общий масштаб: {(GlobalScaleSlider.Value * 100):F0}%";
-        ApplyGlobalSettings();
-        
-        // Также применяем настройки к выбранному элементу если он есть
-        if (_selectedElementSlot != null && !string.IsNullOrEmpty(_selectedElementKey))
-        {
-            ApplyElementSettings();
-        }
-        
-        // Автоматически сохраняем проект при изменении общих настроек
-        _projectManager.SaveProject();
+        _globalSettingsEventHandlerService.OnGlobalScaleSliderValueChanged(sender, e);
     }
     
     private void GlobalScalePreset_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button button && double.TryParse(button.Tag.ToString(), out double scale))
-        {
-            GlobalScaleSlider.Value = scale;
-        }
+        _globalSettingsEventHandlerService.OnGlobalScalePresetClick(sender, e);
     }
     
     private void UseGlobalRotationCheckBox_Changed(object sender, RoutedEventArgs e)
     {
-        if (_projectManager?.CurrentProject?.GlobalSettings == null) return;
-        
-        _projectManager.CurrentProject.GlobalSettings.UseGlobalRotation = UseGlobalRotationCheckBox.IsChecked == true;
-        ApplyGlobalSettings();
-        
-        // Также применяем настройки к выбранному элементу если он есть
-        if (_selectedElementSlot != null && !string.IsNullOrEmpty(_selectedElementKey))
-        {
-            ApplyElementSettings();
-        }
-        
-        // Автоматически сохраняем проект при изменении общих настроек
-        _projectManager.SaveProject();
+        _globalSettingsEventHandlerService.OnUseGlobalRotationCheckBoxChanged(sender, e);
     }
     
     private void GlobalRotationSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        if (_projectManager?.CurrentProject?.GlobalSettings == null) return;
-        
-        _projectManager.CurrentProject.GlobalSettings.GlobalRotation = GlobalRotationSlider.Value;
-        GlobalRotationValueText.Text = $"Общий поворот: {GlobalRotationSlider.Value:F0}°";
-        ApplyGlobalSettings();
-        
-        // Также применяем настройки к выбранному элементу если он есть
-        if (_selectedElementSlot != null && !string.IsNullOrEmpty(_selectedElementKey))
-        {
-            ApplyElementSettings();
-        }
-        
-        // Автоматически сохраняем проект при изменении общих настроек
-        _projectManager.SaveProject();
+        _globalSettingsEventHandlerService.OnGlobalRotationSliderValueChanged(sender, e);
     }
     
     private void GlobalRotationPreset_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button button && double.TryParse(button.Tag.ToString(), out double rotation))
-        {
-            GlobalRotationSlider.Value = rotation;
-        }
+        _globalSettingsEventHandlerService.OnGlobalRotationPresetClick(sender, e);
     }
     
     private void UseGlobalOpacityCheckBox_Changed(object sender, RoutedEventArgs e)
     {
-        if (_projectManager?.CurrentProject?.GlobalSettings == null) return;
-        
-        _projectManager.CurrentProject.GlobalSettings.UseGlobalOpacity = UseGlobalOpacityCheckBox.IsChecked == true;
-        ApplyGlobalSettings();
-        
-        // Также применяем настройки к выбранному элементу если он есть
-        if (_selectedElementSlot != null && !string.IsNullOrEmpty(_selectedElementKey))
-        {
-            ApplyElementSettings();
-        }
-        
-        // Автоматически сохраняем проект при изменении общих настроек
-        _projectManager.SaveProject();
+        _globalSettingsEventHandlerService.OnUseGlobalOpacityCheckBoxChanged(sender, e);
     }
     
     private void GlobalOpacitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        if (_projectManager?.CurrentProject?.GlobalSettings == null) return;
-        
-        _projectManager.CurrentProject.GlobalSettings.GlobalOpacity = GlobalOpacitySlider.Value;
-        GlobalOpacityValueText.Text = $"Общая прозрачность: {(GlobalOpacitySlider.Value * 100):F0}%";
-        ApplyGlobalSettings();
-        
-        // Также применяем настройки к выбранному элементу если он есть
-        if (_selectedElementSlot != null && !string.IsNullOrEmpty(_selectedElementKey))
-        {
-            ApplyElementSettings();
-        }
-        
-        // Автоматически сохраняем проект при изменении общих настроек
-        _projectManager.SaveProject();
+        _globalSettingsEventHandlerService.OnGlobalOpacitySliderValueChanged(sender, e);
     }
     
     private void TransitionTypeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_projectManager?.CurrentProject?.GlobalSettings == null) return;
-        
-        _projectManager.CurrentProject.GlobalSettings.TransitionType = (TransitionType)TransitionTypeComboBox.SelectedIndex;
-        
-        // Обновляем TransitionService с новыми настройками
-        _transitionService.SetGlobalSettings(_projectManager.CurrentProject.GlobalSettings);
-        
-        // Автоматически сохраняем проект при изменении общих настроек
-        _projectManager.SaveProject();
+        _globalSettingsEventHandlerService.OnTransitionTypeComboBoxSelectionChanged(sender, e);
     }
     
     private void TransitionDurationSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        if (_projectManager?.CurrentProject?.GlobalSettings == null) return;
-        
-        _projectManager.CurrentProject.GlobalSettings.TransitionDuration = TransitionDurationSlider.Value;
-        TransitionDurationValueText.Text = $"Длительность: {TransitionDurationSlider.Value:F1}с";
-        
-        // Обновляем TransitionService с новыми настройками
-        _transitionService.SetGlobalSettings(_projectManager.CurrentProject.GlobalSettings);
-        
-        // Автоматически сохраняем проект при изменении общих настроек
-        _projectManager.SaveProject();
+        _globalSettingsEventHandlerService.OnTransitionDurationSliderValueChanged(sender, e);
     }
     
     private void AutoPlayNextCheckBox_Changed(object sender, RoutedEventArgs e)
     {
-        if (_projectManager?.CurrentProject?.GlobalSettings == null) return;
-        
-        _projectManager.CurrentProject.GlobalSettings.AutoPlayNext = AutoPlayNextCheckBox.IsChecked == true;
-        
-        // Автоматически сохраняем проект при изменении общих настроек
-        _projectManager.SaveProject();
+        _globalSettingsEventHandlerService.OnAutoPlayNextCheckBoxChanged(sender, e);
     }
     
     private void LoopPlaylistCheckBox_Changed(object sender, RoutedEventArgs e)
     {
-        if (_projectManager?.CurrentProject?.GlobalSettings == null) return;
-        
-        _projectManager.CurrentProject.GlobalSettings.LoopPlaylist = LoopPlaylistCheckBox.IsChecked == true;
-        
-        // Автоматически сохраняем проект при изменении общих настроек
-        _projectManager.SaveProject();
+        _globalSettingsEventHandlerService.OnLoopPlaylistCheckBoxChanged(sender, e);
     }
     
     // Выбрать элемент для настройки
@@ -3672,25 +2329,7 @@ public partial class MainWindow
     {
         _selectedElementSlot = slot;
         _selectedElementKey = slotKey;
-        
-        // Устанавливаем DisplayName по умолчанию если пустое
-        if (string.IsNullOrEmpty(slot.DisplayName))
-        {
-            slot.DisplayName = System.IO.Path.GetFileNameWithoutExtension(slot.MediaPath);
-        }
-        
-        // Показываем панель настроек
-        NoElementSelectedText.Visibility = Visibility.Collapsed;
-        SettingsContentPanel.Visibility = Visibility.Visible;
-        RenameElementButton.Visibility = Visibility.Visible;
-        
-        // Показываем кнопки навигации если есть больше одного элемента
-        bool hasMultipleElements = _projectManager?.CurrentProject?.MediaSlots?.Count() > 1;
-        PreviousElementButton.Visibility = hasMultipleElements ? Visibility.Visible : Visibility.Collapsed;
-        NextElementButton.Visibility = hasMultipleElements ? Visibility.Visible : Visibility.Collapsed;
-        
-        // Загружаем текущие настройки элемента
-        LoadElementSettings();
+        _elementSettingsUIService.SelectElementForSettings(slot, slotKey);
     }
     
     // Снять выбор элемента
@@ -3698,158 +2337,21 @@ public partial class MainWindow
     {
         _selectedElementSlot = null;
         _selectedElementKey = null;
-        
-        // Скрываем панель настроек
-        NoElementSelectedText.Visibility = Visibility.Visible;
-        SettingsContentPanel.Visibility = Visibility.Collapsed;
-        RenameElementButton.Visibility = Visibility.Collapsed;
-        PreviousElementButton.Visibility = Visibility.Collapsed;
-        NextElementButton.Visibility = Visibility.Collapsed;
-        
-        ElementTitleText.Text = "Настройки элемента";
+        _elementSettingsUIService.UnselectElement();
     }
     
     // Загрузить настройки элемента в UI
     private void LoadElementSettings()
     {
         if (_selectedElementSlot == null) return;
-        
-        // Устанавливаем значения слайдеров без вызова событий
-        SpeedSlider.ValueChanged -= SpeedSlider_ValueChanged;
-        OpacitySlider.ValueChanged -= OpacitySlider_ValueChanged;
-        VolumeSlider.ValueChanged -= VolumeSlider_ValueChanged;
-        ScaleSlider.ValueChanged -= ScaleSlider_ValueChanged;
-        RotationSlider.ValueChanged -= RotationSlider_ValueChanged;
-        
-        SpeedSlider.Value = _selectedElementSlot.PlaybackSpeed;
-        OpacitySlider.Value = _selectedElementSlot.Opacity;
-        VolumeSlider.Value = _selectedElementSlot.Volume;
-        ScaleSlider.Value = _selectedElementSlot.Scale;
-        RotationSlider.Value = _selectedElementSlot.Rotation;
-        
-        SpeedSlider.ValueChanged += SpeedSlider_ValueChanged;
-        OpacitySlider.ValueChanged += OpacitySlider_ValueChanged;
-        VolumeSlider.ValueChanged += VolumeSlider_ValueChanged;
-        ScaleSlider.ValueChanged += ScaleSlider_ValueChanged;
-        RotationSlider.ValueChanged += RotationSlider_ValueChanged;
-        
-        // Обновляем текстовые метки
-        SpeedValueText.Text = $"Скорость: {_selectedElementSlot.PlaybackSpeed:F1}x";
-        OpacityValueText.Text = $"Прозрачность: {(_selectedElementSlot.Opacity * 100):F0}%";
-        VolumeValueText.Text = $"Звук: {(_selectedElementSlot.Volume * 100):F0}%";
-        ScaleValueText.Text = $"Масштаб: {(_selectedElementSlot.Scale * 100):F0}%";
-        RotationValueText.Text = $"Поворот: {_selectedElementSlot.Rotation:F0}°";
-        
-        // Показываем или скрываем секции настроек в зависимости от типа элемента
-        if (_selectedElementSlot.Type == MediaType.Text)
-        {
-            // Для текстовых элементов скрываем ненужные настройки
-            SpeedGroupBox.Visibility = Visibility.Collapsed;
-            OpacityGroupBox.Visibility = Visibility.Collapsed;
-            VolumeGroupBox.Visibility = Visibility.Collapsed;
-            
-            // Показываем настройки текста
-            TextSettingsGroupBox.Visibility = Visibility.Visible;
-            LoadTextSettings();
-        }
-        else if (_selectedElementSlot.Type == MediaType.Image)
-        {
-            // Для изображений скрываем скорость и громкость (они не применимы)
-            SpeedGroupBox.Visibility = Visibility.Collapsed;
-            VolumeGroupBox.Visibility = Visibility.Collapsed;
-            
-            // Показываем прозрачность и другие настройки
-            OpacityGroupBox.Visibility = Visibility.Visible;
-            
-            // Скрываем настройки текста
-            TextSettingsGroupBox.Visibility = Visibility.Collapsed;
-        }
-        else
-        {
-            // Для видео и аудио показываем все настройки
-            SpeedGroupBox.Visibility = Visibility.Visible;
-            OpacityGroupBox.Visibility = Visibility.Visible;
-            VolumeGroupBox.Visibility = Visibility.Visible;
-            
-            // Скрываем настройки текста
-            TextSettingsGroupBox.Visibility = Visibility.Collapsed;
-        }
-        
-        // Применяем настройки к активным медиа элементам
-        ApplyElementSettings();
-        
-        UpdateElementTitle();
+        _elementSettingsUIService.LoadElementSettings(_selectedElementSlot);
     }
     
     // Загрузить настройки текста в UI
     private void LoadTextSettings()
     {
         if (_selectedElementSlot == null || _selectedElementSlot.Type != MediaType.Text) return;
-        
-        // Отключаем события чтобы избежать лишних вызовов
-        TextColorComboBox.SelectionChanged -= TextColorComboBox_SelectionChanged;
-        FontFamilyComboBox.SelectionChanged -= FontFamilyComboBox_SelectionChanged;
-        FontSizeSlider.ValueChanged -= FontSizeSlider_ValueChanged;
-        TextContentTextBox.TextChanged -= TextContentTextBox_TextChanged;
-        UseManualPositionCheckBox.Checked -= UseManualPositionCheckBox_Checked;
-        UseManualPositionCheckBox.Unchecked -= UseManualPositionCheckBox_Unchecked;
-        TextXTextBox.TextChanged -= TextXTextBox_TextChanged;
-        TextYTextBox.TextChanged -= TextYTextBox_TextChanged;
-        
-        // Загружаем настройки цвета
-        for (int i = 0; i < TextColorComboBox.Items.Count; i++)
-        {
-            if (TextColorComboBox.Items[i] is ComboBoxItem item && item.Tag.ToString() == _selectedElementSlot.FontColor)
-            {
-                TextColorComboBox.SelectedIndex = i;
-                break;
-            }
-        }
-        
-        // Загружаем шрифт
-        for (int i = 0; i < FontFamilyComboBox.Items.Count; i++)
-        {
-            if (FontFamilyComboBox.Items[i] is ComboBoxItem item && item.Tag.ToString() == _selectedElementSlot.FontFamily)
-            {
-                FontFamilyComboBox.SelectedIndex = i;
-                break;
-            }
-        }
-        
-        // Загружаем размер шрифта
-        FontSizeSlider.Value = _selectedElementSlot.FontSize;
-        FontSizeValueText.Text = $"{_selectedElementSlot.FontSize:F0}px";
-        
-        // Загружаем содержимое текста
-        TextContentTextBox.Text = _selectedElementSlot.TextContent ?? "";
-        
-        // Загружаем ручную настройку положения
-        UseManualPositionCheckBox.IsChecked = _selectedElementSlot.UseManualPosition;
-        ManualPositionPanel.Visibility = _selectedElementSlot.UseManualPosition ? Visibility.Visible : Visibility.Collapsed;
-        TextXTextBox.Text = _selectedElementSlot.TextX.ToString();
-        TextYTextBox.Text = _selectedElementSlot.TextY.ToString();
-        
-        // Загружаем состояние видимости
-        if (_selectedElementSlot.IsTextVisible)
-        {
-            HideTextButton.Content = "👁️ Скрыть текст";
-            HideTextButton.Background = new SolidColorBrush(Color.FromRgb(244, 67, 54)); // Красный
-        }
-        else
-        {
-            HideTextButton.Content = "👁️ Показать текст";
-            HideTextButton.Background = new SolidColorBrush(Color.FromRgb(76, 175, 80)); // Зеленый
-        }
-        
-        // Включаем события обратно
-        TextColorComboBox.SelectionChanged += TextColorComboBox_SelectionChanged;
-        FontFamilyComboBox.SelectionChanged += FontFamilyComboBox_SelectionChanged;
-        FontSizeSlider.ValueChanged += FontSizeSlider_ValueChanged;
-        TextContentTextBox.TextChanged += TextContentTextBox_TextChanged;
-        UseManualPositionCheckBox.Checked += UseManualPositionCheckBox_Checked;
-        UseManualPositionCheckBox.Unchecked += UseManualPositionCheckBox_Unchecked;
-        TextXTextBox.TextChanged += TextXTextBox_TextChanged;
-        TextYTextBox.TextChanged += TextYTextBox_TextChanged;
+        _elementSettingsUIService.LoadTextSettings(_selectedElementSlot);
     }
     
     // Обновить заголовок элемента
@@ -3857,516 +2359,62 @@ public partial class MainWindow
     {
         if (_selectedElementSlot != null)
         {
-            ElementTitleText.Text = $"Настройки: {_selectedElementSlot.DisplayName}";
+            _elementSettingsUIService.UpdateElementTitle(_selectedElementSlot);
         }
     }
     
     // Применить настройки элемента к активным медиа
     public void ApplyElementSettings(MediaSlot slot, string slotKey)
     {
-        if (slot == null || string.IsNullOrEmpty(slotKey)) return;
-        
-        // Получаем финальные значения с учетом общих настроек
-        var finalVolume = GetFinalVolume(slot.Volume);
-        var finalOpacity = GetFinalOpacity(slot.Opacity);
-        var finalScale = GetFinalScale(slot.Scale);
-        var finalRotation = GetFinalRotation(slot.Rotation);
-        
-        System.Diagnostics.Debug.WriteLine($"ApplyElementSettings: Slot={slotKey}, Type={slot.Type}, FinalOpacity={finalOpacity}, _currentMainMedia={_currentMainMedia}");
-        
-        // Применяем настройки к активному медиа элементу
-        if (_activeSlotMedia.TryGetValue(slotKey, out MediaElement? mediaElement))
-        {
-            mediaElement.SpeedRatio = slot.PlaybackSpeed;
-            mediaElement.Opacity = finalOpacity;
-            mediaElement.Volume = finalVolume;
-            
-            // Применяем масштаб и поворот
-            ApplyScaleAndRotation(mediaElement, finalScale, finalRotation);
-        }
-        
-        // Если это главный плеер
-        if (_currentMainMedia == slotKey)
-        {
-            this.mediaElement.SpeedRatio = slot.PlaybackSpeed;
-            this.mediaElement.Volume = finalVolume;
-            
-            // Синхронизируем настройки с вторым экраном
-            if (_secondaryMediaElement != null)
-            {
-                _secondaryMediaElement.SpeedRatio = slot.PlaybackSpeed;
-                _secondaryMediaElement.Volume = 0; // Отключаем звук на втором экране чтобы избежать дублирования
-                
-                // Применяем масштаб и поворот к видео на втором экране
-                ApplyScaleAndRotation(_secondaryMediaElement, finalScale, finalRotation);
-                
-                System.Diagnostics.Debug.WriteLine($"СИНХРОНИЗАЦИЯ НАСТРОЕК: Скорость={slot.PlaybackSpeed:F1}x, Звук отключен на втором экране");
-            }
-            
-            // Для изображений применяем прозрачность к Border контейнеру
-            if (slot.Type == MediaType.Image)
-            {
-                mediaBorder.Opacity = finalOpacity;
-                System.Diagnostics.Debug.WriteLine($"ApplyElementSettings: Применена прозрачность {finalOpacity} к mediaBorder для изображения");
-                
-                // Применяем масштаб и поворот к mediaBorder для правильного центра поворота
-                ApplyScaleAndRotation(mediaBorder, finalScale, finalRotation);
-                
-                // Синхронизируем прозрачность изображения на втором экране
-                if (_secondaryScreenWindow?.Content is FrameworkElement secondaryElement)
-                {
-                    secondaryElement.Opacity = finalOpacity;
-                    
-                    // Применяем масштаб и поворот к изображению на втором экране
-                    ApplyScaleAndRotation(secondaryElement, finalScale, finalRotation);
-                }
-            }
-            else if (slot.Type == MediaType.Video)
-            {
-                // Для видео применяем прозрачность к MediaElement
-                this.mediaElement.Visibility = Visibility.Visible;
-                
-                // Проверяем, что прозрачность не равна 0
-                if (finalOpacity <= 0)
-                {
-                    System.Diagnostics.Debug.WriteLine($"ПРЕДУПРЕЖДЕНИЕ: Прозрачность равна {finalOpacity}, устанавливаем 1.0");
-                    finalOpacity = 1.0;
-                }
-                
-                this.mediaElement.Opacity = finalOpacity;
-                
-                // Убеждаемся, что mediaBorder видим
-                mediaBorder.Visibility = Visibility.Visible;
-                mediaBorder.Opacity = 1.0; // Border всегда непрозрачен
-                
-                // Применяем масштаб и поворот к mediaBorder для правильного центра поворота
-                ApplyScaleAndRotation(mediaBorder, finalScale, finalRotation);
-                
-                // Синхронизируем прозрачность, масштаб и поворот видео на втором экране
-                if (_secondaryMediaElement != null)
-                {
-                    _secondaryMediaElement.Visibility = Visibility.Visible;
-                    _secondaryMediaElement.Opacity = finalOpacity;
-                    ApplyScaleAndRotation(_secondaryMediaElement, finalScale, finalRotation);
-                }
-                
-                System.Diagnostics.Debug.WriteLine($"ApplyElementSettings (Video): Opacity={finalOpacity}, Visibility=Visible, SlotKey={slotKey}, Source={this.mediaElement.Source?.LocalPath}");
-            }
-            
-            // Для текстовых блоков применяем прозрачность, масштаб и поворот
-            if (slot.Type == MediaType.Text)
-            {
-                textOverlayGrid.Opacity = finalOpacity;
-                var textElement = textOverlayGrid.Children.OfType<TextBlock>().FirstOrDefault();
-                if (textElement != null)
-                {
-                    // Применяем масштаб и поворот к текстовому блоку
-                    ApplyScaleAndRotation(textElement, finalScale, finalRotation);
-                }
-                
-                // Синхронизируем настройки текста на втором экране
-                if (_secondaryScreenWindow?.Content is Grid secondaryGrid)
-                {
-                    var secondaryTextElement = secondaryGrid.Children.OfType<TextBlock>().FirstOrDefault();
-                    if (secondaryTextElement != null)
-                    {
-                        secondaryTextElement.Opacity = finalOpacity;
-                        
-                        // Применяем масштаб и поворот к тексту на втором экране
-                        ApplyScaleAndRotation(secondaryTextElement, finalScale, finalRotation);
-                    }
-                }
-            }
-        }
+        _elementSettingsService.ApplyElementSettings(slot, slotKey);
     }
     
     private void ApplyElementSettings()
     {
         if (_selectedElementSlot == null || string.IsNullOrEmpty(_selectedElementKey)) return;
-        
-        // Получаем финальные значения с учетом общих настроек
-        var finalVolume = GetFinalVolume(_selectedElementSlot.Volume);
-        var finalOpacity = GetFinalOpacity(_selectedElementSlot.Opacity);
-        var finalScale = GetFinalScale(_selectedElementSlot.Scale);
-        var finalRotation = GetFinalRotation(_selectedElementSlot.Rotation);
-        
-        // Применяем настройки к активному медиа элементу
-        if (_activeSlotMedia.TryGetValue(_selectedElementKey, out MediaElement? mediaElement))
-        {
-            mediaElement.SpeedRatio = _selectedElementSlot.PlaybackSpeed;
-            mediaElement.Opacity = finalOpacity;
-            mediaElement.Volume = finalVolume;
-            
-            // Применяем масштаб и поворот
-            ApplyScaleAndRotation(mediaElement, finalScale, finalRotation);
-        }
-        
-        // Если это главный плеер
-        if (_currentMainMedia == _selectedElementKey)
-        {
-            this.mediaElement.SpeedRatio = _selectedElementSlot.PlaybackSpeed;
-            this.mediaElement.Volume = finalVolume;
-            
-            // Синхронизируем настройки с вторым экраном
-            if (_secondaryMediaElement != null)
-            {
-                _secondaryMediaElement.SpeedRatio = _selectedElementSlot.PlaybackSpeed;
-                _secondaryMediaElement.Volume = 0; // Отключаем звук на втором экране чтобы избежать дублирования
-                
-                // Применяем масштаб и поворот к видео на втором экране
-                ApplyScaleAndRotation(_secondaryMediaElement, finalScale, finalRotation);
-                
-                System.Diagnostics.Debug.WriteLine($"СИНХРОНИЗАЦИЯ НАСТРОЕК: Скорость={_selectedElementSlot.PlaybackSpeed:F1}x, Звук отключен на втором экране");
-            }
-            
-            // Для изображений применяем прозрачность к Border контейнеру
-            if (_selectedElementSlot.Type == MediaType.Image)
-            {
-                mediaBorder.Opacity = finalOpacity;
-                
-                // Применяем масштаб и поворот к mediaBorder для правильного центра поворота
-                ApplyScaleAndRotation(mediaBorder, finalScale, finalRotation);
-                
-                // Синхронизируем прозрачность изображения на втором экране
-                if (_secondaryScreenWindow?.Content is FrameworkElement secondaryElement)
-                {
-                    secondaryElement.Opacity = finalOpacity;
-                    
-                    // Применяем масштаб и поворот к изображению на втором экране
-                    ApplyScaleAndRotation(secondaryElement, finalScale, finalRotation);
-                }
-            }
-            else
-            {
-                // Для видео применяем прозрачность к MediaElement
-                this.mediaElement.Opacity = finalOpacity;
-                
-                // Применяем масштаб и поворот к mediaBorder для правильного центра поворота
-                ApplyScaleAndRotation(mediaBorder, finalScale, finalRotation);
-                
-                // Синхронизируем прозрачность видео на втором экране
-                if (_secondaryMediaElement != null)
-                {
-                    _secondaryMediaElement.Opacity = finalOpacity;
-                }
-            }
-            
-            // Для текстовых блоков применяем прозрачность, масштаб и поворот
-            if (_selectedElementSlot.Type == MediaType.Text)
-            {
-                textOverlayGrid.Opacity = finalOpacity;
-                var textElement = textOverlayGrid.Children.OfType<TextBlock>().FirstOrDefault();
-                if (textElement != null)
-                {
-                    // Применяем масштаб и поворот к текстовому блоку
-                    ApplyScaleAndRotation(textElement, finalScale, finalRotation);
-                }
-                
-                // Синхронизируем настройки текста на втором экране
-                if (_secondaryScreenWindow?.Content is Grid secondaryGrid)
-                {
-                    var secondaryTextElement = secondaryGrid.Children.OfType<TextBlock>().FirstOrDefault();
-                    if (secondaryTextElement != null)
-                    {
-                        secondaryTextElement.Opacity = finalOpacity;
-                        
-                        // Применяем масштаб и поворот к тексту на втором экране
-                        ApplyScaleAndRotation(secondaryTextElement, finalScale, finalRotation);
-                    }
-                }
-            }
-        }
-        
-        // Применяем к аудио элементам
-        if (_activeAudioSlots.TryGetValue(_selectedElementKey, out MediaElement? audioElement))
-        {
-            audioElement.SpeedRatio = _selectedElementSlot.PlaybackSpeed;
-            audioElement.Volume = finalVolume;
-        }
+        _elementSettingsService.ApplyElementSettings(_selectedElementSlot, _selectedElementKey);
     }
     
     // Применить общие настройки ко всем активным медиа элементам
     public void ApplyGlobalSettings()
     {
-        if (_projectManager?.CurrentProject?.GlobalSettings == null) 
-        {
-            System.Diagnostics.Debug.WriteLine("ApplyGlobalSettings: GlobalSettings is null, returning");
-            return;
-        }
-        
-        var globalSettings = _projectManager.CurrentProject.GlobalSettings;
-        System.Diagnostics.Debug.WriteLine($"ApplyGlobalSettings: UseGlobalOpacity={globalSettings.UseGlobalOpacity}, GlobalOpacity={globalSettings.GlobalOpacity}");
-        System.Diagnostics.Debug.WriteLine($"ApplyGlobalSettings: _currentMainMedia={_currentMainMedia}");
-        
-        // Применяем к главному плееру (основной медиа элемент)
-        if (_currentMainMedia != null)
-        {
-            var slot = _projectManager.CurrentProject.MediaSlots.FirstOrDefault(s => 
-                (s.IsTrigger ? $"Trigger_{s.Column}" : $"Slot_{s.Column}_{s.Row}") == _currentMainMedia);
-            
-            if (slot != null)
-            {
-                var finalVolume = GetFinalVolume(slot.Volume);
-                var finalOpacity = GetFinalOpacity(slot.Opacity);
-                var finalScale = GetFinalScale(slot.Scale);
-                var finalRotation = GetFinalRotation(slot.Rotation);
-                
-                System.Diagnostics.Debug.WriteLine($"ApplyGlobalSettings: Main media - Slot={_currentMainMedia}, FinalOpacity={finalOpacity}, FinalScale={finalScale}, FinalRotation={finalRotation}");
-                
-                this.mediaElement.Volume = finalVolume;
-                
-                if (slot.Type == MediaType.Image)
-                {
-                    // Для изображений применяем прозрачность к mediaBorder
-                    mediaBorder.Opacity = finalOpacity;
-                    
-                    // Применяем масштаб и поворот к mediaBorder для правильного центра поворота
-                    ApplyScaleAndRotation(mediaBorder, finalScale, finalRotation);
-                    
-                    System.Diagnostics.Debug.WriteLine($"ApplyGlobalSettings: Applied opacity {finalOpacity} to mediaBorder for image");
-                }
-                else if (slot.Type == MediaType.Video)
-                {
-                    // Для видео применяем прозрачность к mediaElement
-                    this.mediaElement.Opacity = finalOpacity;
-                    
-                    // Применяем масштаб и поворот к mediaBorder для правильного центра поворота
-                    ApplyScaleAndRotation(mediaBorder, finalScale, finalRotation);
-                    
-                    // Синхронизируем прозрачность, масштаб и поворот видео на втором экране
-                    if (_secondaryMediaElement != null)
-                    {
-                        _secondaryMediaElement.Opacity = finalOpacity;
-                        ApplyScaleAndRotation(_secondaryMediaElement, finalScale, finalRotation);
-                    }
-                    
-                    System.Diagnostics.Debug.WriteLine($"ApplyGlobalSettings: Applied opacity {finalOpacity} to mediaElement for video");
-                }
-                else if (slot.Type == MediaType.Text)
-                {
-                    // Для текстовых блоков применяем прозрачность к textOverlayGrid
-                    textOverlayGrid.Opacity = finalOpacity;
-                    
-                    // Применяем масштаб и поворот к текстовому блоку
-                    var textElement = textOverlayGrid.Children.OfType<TextBlock>().FirstOrDefault();
-                    if (textElement != null)
-                    {
-                        ApplyScaleAndRotation(textElement, finalScale, finalRotation);
-                    }
-                    System.Diagnostics.Debug.WriteLine($"ApplyGlobalSettings: Applied opacity {finalOpacity} to textOverlayGrid for text");
-                }
-            }
-        }
-        
-        // Применяем к аудио элементам
-        foreach (var kvp in _activeAudioSlots)
-        {
-            var slotKey = kvp.Key;
-            var audioElement = kvp.Value;
-            
-            var slot = _projectManager.CurrentProject.MediaSlots.FirstOrDefault(s => 
-                (s.IsTrigger ? $"Trigger_{s.Column}" : $"Slot_{s.Column}_{s.Row}") == slotKey);
-            
-            if (slot != null)
-            {
-                var finalVolume = GetFinalVolume(slot.Volume);
-                audioElement.Volume = finalVolume;
-                System.Diagnostics.Debug.WriteLine($"ApplyGlobalSettings: Applied volume {finalVolume} to audio element {slotKey}");
-            }
-        }
-        
-        // Применяем ко всем активным медиа элементам в _activeSlotMedia
-        foreach (var kvp in _activeSlotMedia)
-        {
-            var slotKey = kvp.Key;
-            var mediaElement = kvp.Value;
-            
-            // Находим соответствующий слот
-            var slot = _projectManager.CurrentProject.MediaSlots.FirstOrDefault(s => 
-                (s.IsTrigger ? $"Trigger_{s.Column}" : $"Slot_{s.Column}_{s.Row}") == slotKey);
-            
-            if (slot != null)
-            {
-                var finalVolume = GetFinalVolume(slot.Volume);
-                var finalOpacity = GetFinalOpacity(slot.Opacity);
-                
-                mediaElement.Volume = finalVolume;
-                mediaElement.Opacity = finalOpacity;
-                System.Diagnostics.Debug.WriteLine($"ApplyGlobalSettings: Applied volume {finalVolume} and opacity {finalOpacity} to slot media {slotKey}");
-            }
-        }
-        
-        // Применяем общие настройки ко всем активным медиа элементам
-        // Перебираем все активные слоты и применяем к ним финальные настройки
-        foreach (var kvp in _activeSlotMedia)
-        {
-            var slotKey = kvp.Key;
-            var mediaElement = kvp.Value;
-            
-            var slot = _projectManager.CurrentProject.MediaSlots.FirstOrDefault(s => 
-                (s.IsTrigger ? $"Trigger_{s.Column}" : $"Slot_{s.Column}_{s.Row}") == slotKey);
-            
-            if (slot != null)
-            {
-                var finalOpacity = GetFinalOpacity(slot.Opacity);
-                var finalScale = GetFinalScale(slot.Scale);
-                var finalRotation = GetFinalRotation(slot.Rotation);
-                
-                mediaElement.Opacity = finalOpacity;
-                ApplyScaleAndRotation(mediaElement, finalScale, finalRotation);
-                System.Diagnostics.Debug.WriteLine($"ApplyGlobalSettings: Applied final settings to slot media {slotKey} - Opacity={finalOpacity}, Scale={finalScale}, Rotation={finalRotation}");
-            }
-        }
-        
-        // Применяем ко второму экрану если он активен
-        if (_secondaryScreenWindow != null)
-        {
-            var secondaryFinalOpacity = globalSettings.UseGlobalOpacity ? globalSettings.GlobalOpacity : 1.0;
-            _secondaryScreenWindow.Opacity = secondaryFinalOpacity;
-            System.Diagnostics.Debug.WriteLine($"ApplyGlobalSettings: Applied opacity {secondaryFinalOpacity} to secondary screen");
-        }
+        _elementSettingsService.ApplyGlobalSettings();
     }
     
     // Получить финальную громкость с учетом общих настроек
     private double GetFinalVolume(double personalVolume)
     {
-        if (_projectManager?.CurrentProject?.GlobalSettings == null) return personalVolume;
-        
-        var globalSettings = _projectManager.CurrentProject.GlobalSettings;
-        return globalSettings.UseGlobalVolume ? globalSettings.GlobalVolume : personalVolume;
+        return _settingsManager.GetFinalVolume(personalVolume);
     }
     
     // Получить финальную прозрачность с учетом общих настроек
     private double GetFinalOpacity(double personalOpacity)
     {
-        if (_projectManager?.CurrentProject?.GlobalSettings == null) 
-        {
-            System.Diagnostics.Debug.WriteLine($"GetFinalOpacity: GlobalSettings is null, returning personalOpacity={personalOpacity}");
-            return personalOpacity;
-        }
-        
-        var globalSettings = _projectManager.CurrentProject.GlobalSettings;
-        var finalOpacity = globalSettings.UseGlobalOpacity ? globalSettings.GlobalOpacity : personalOpacity;
-        System.Diagnostics.Debug.WriteLine($"GetFinalOpacity: UseGlobalOpacity={globalSettings.UseGlobalOpacity}, GlobalOpacity={globalSettings.GlobalOpacity}, PersonalOpacity={personalOpacity}, FinalOpacity={finalOpacity}");
-        return finalOpacity;
+        return _settingsManager.GetFinalOpacity(personalOpacity);
     }
     
     // Получить финальный масштаб с учетом общих настроек
     private double GetFinalScale(double personalScale)
     {
-        if (_projectManager?.CurrentProject?.GlobalSettings == null) return personalScale;
-        
-        var globalSettings = _projectManager.CurrentProject.GlobalSettings;
-        return globalSettings.UseGlobalScale ? globalSettings.GlobalScale : personalScale;
+        return _settingsManager.GetFinalScale(personalScale);
     }
     
     // Получить финальный поворот с учетом общих настроек
     private double GetFinalRotation(double personalRotation)
     {
-        if (_projectManager?.CurrentProject?.GlobalSettings == null) return personalRotation;
-        
-        var globalSettings = _projectManager.CurrentProject.GlobalSettings;
-        return globalSettings.UseGlobalRotation ? globalSettings.GlobalRotation : personalRotation;
+        return _settingsManager.GetFinalRotation(personalRotation);
     }
     
     // Применить масштаб и поворот к элементу с правильным центром
     private void ApplyScaleAndRotation(FrameworkElement element, double scale, double rotation)
     {
-        if (element == null) return;
-        
-        var transform = new TransformGroup();
-        transform.Children.Add(new ScaleTransform(scale, scale));
-        transform.Children.Add(new RotateTransform(rotation));
-        element.RenderTransform = transform;
-        
-        // Для медиа элементов (MediaElement, Image) устанавливаем точку поворота в центр медиаплеера
-        if (element is MediaElement || element is Image)
-        {
-            element.RenderTransformOrigin = new Point(0.5, 0.5); // Центр медиаплеера
-        }
-        else
-        {
-            element.RenderTransformOrigin = new Point(0.5, 0.5); // Центр элемента для других типов
-        }
+        _settingsManager.ApplyScaleAndRotation(element, scale, rotation);
     }
     
     // Загрузить общие настройки в UI
     private void LoadGlobalSettings()
     {
-        if (_projectManager?.CurrentProject?.GlobalSettings == null) return;
-        
-        var globalSettings = _projectManager.CurrentProject.GlobalSettings;
-        
-        // Отключаем события для предотвращения вызова ApplyGlobalSettings
-        UseGlobalVolumeCheckBox.Checked -= UseGlobalVolumeCheckBox_Changed;
-        UseGlobalVolumeCheckBox.Unchecked -= UseGlobalVolumeCheckBox_Changed;
-        GlobalVolumeSlider.ValueChanged -= GlobalVolumeSlider_ValueChanged;
-        UseGlobalOpacityCheckBox.Checked -= UseGlobalOpacityCheckBox_Changed;
-        UseGlobalOpacityCheckBox.Unchecked -= UseGlobalOpacityCheckBox_Changed;
-        GlobalOpacitySlider.ValueChanged -= GlobalOpacitySlider_ValueChanged;
-        UseGlobalScaleCheckBox.Checked -= UseGlobalScaleCheckBox_Changed;
-        UseGlobalScaleCheckBox.Unchecked -= UseGlobalScaleCheckBox_Changed;
-        GlobalScaleSlider.ValueChanged -= GlobalScaleSlider_ValueChanged;
-        UseGlobalRotationCheckBox.Checked -= UseGlobalRotationCheckBox_Changed;
-        UseGlobalRotationCheckBox.Unchecked -= UseGlobalRotationCheckBox_Changed;
-        GlobalRotationSlider.ValueChanged -= GlobalRotationSlider_ValueChanged;
-        TransitionTypeComboBox.SelectionChanged -= TransitionTypeComboBox_SelectionChanged;
-        TransitionDurationSlider.ValueChanged -= TransitionDurationSlider_ValueChanged;
-        AutoPlayNextCheckBox.Checked -= AutoPlayNextCheckBox_Changed;
-        AutoPlayNextCheckBox.Unchecked -= AutoPlayNextCheckBox_Changed;
-        LoopPlaylistCheckBox.Checked -= LoopPlaylistCheckBox_Changed;
-        LoopPlaylistCheckBox.Unchecked -= LoopPlaylistCheckBox_Changed;
-        
-        // Загружаем значения
-        UseGlobalVolumeCheckBox.IsChecked = globalSettings.UseGlobalVolume;
-        GlobalVolumeSlider.Value = globalSettings.GlobalVolume;
-        GlobalVolumeValueText.Text = $"Общая громкость: {(globalSettings.GlobalVolume * 100):F0}%";
-        
-        UseGlobalOpacityCheckBox.IsChecked = globalSettings.UseGlobalOpacity;
-        GlobalOpacitySlider.Value = globalSettings.GlobalOpacity;
-        GlobalOpacityValueText.Text = $"Общая прозрачность: {(globalSettings.GlobalOpacity * 100):F0}%";
-        
-        UseGlobalScaleCheckBox.IsChecked = globalSettings.UseGlobalScale;
-        GlobalScaleSlider.Value = globalSettings.GlobalScale;
-        GlobalScaleValueText.Text = $"Общий масштаб: {(globalSettings.GlobalScale * 100):F0}%";
-        
-        UseGlobalRotationCheckBox.IsChecked = globalSettings.UseGlobalRotation;
-        GlobalRotationSlider.Value = globalSettings.GlobalRotation;
-        GlobalRotationValueText.Text = $"Общий поворот: {globalSettings.GlobalRotation:F0}°";
-        
-        TransitionTypeComboBox.SelectedIndex = (int)globalSettings.TransitionType;
-        TransitionDurationSlider.Value = globalSettings.TransitionDuration;
-        TransitionDurationValueText.Text = $"Длительность: {globalSettings.TransitionDuration:F1}с";
-        
-        AutoPlayNextCheckBox.IsChecked = globalSettings.AutoPlayNext;
-        LoopPlaylistCheckBox.IsChecked = globalSettings.LoopPlaylist;
-        
-        // Обновляем TransitionService с загруженными настройками
-        _transitionService.SetGlobalSettings(globalSettings);
-        
-        // Включаем события обратно
-        UseGlobalVolumeCheckBox.Checked += UseGlobalVolumeCheckBox_Changed;
-        UseGlobalVolumeCheckBox.Unchecked += UseGlobalVolumeCheckBox_Changed;
-        GlobalVolumeSlider.ValueChanged += GlobalVolumeSlider_ValueChanged;
-        UseGlobalOpacityCheckBox.Checked += UseGlobalOpacityCheckBox_Changed;
-        UseGlobalOpacityCheckBox.Unchecked += UseGlobalOpacityCheckBox_Changed;
-        GlobalOpacitySlider.ValueChanged += GlobalOpacitySlider_ValueChanged;
-        UseGlobalScaleCheckBox.Checked += UseGlobalScaleCheckBox_Changed;
-        UseGlobalScaleCheckBox.Unchecked += UseGlobalScaleCheckBox_Changed;
-        GlobalScaleSlider.ValueChanged += GlobalScaleSlider_ValueChanged;
-        UseGlobalRotationCheckBox.Checked += UseGlobalRotationCheckBox_Changed;
-        UseGlobalRotationCheckBox.Unchecked += UseGlobalRotationCheckBox_Changed;
-        GlobalRotationSlider.ValueChanged += GlobalRotationSlider_ValueChanged;
-        TransitionTypeComboBox.SelectionChanged += TransitionTypeComboBox_SelectionChanged;
-        TransitionDurationSlider.ValueChanged += TransitionDurationSlider_ValueChanged;
-        AutoPlayNextCheckBox.Checked += AutoPlayNextCheckBox_Changed;
-        AutoPlayNextCheckBox.Unchecked += AutoPlayNextCheckBox_Changed;
-        LoopPlaylistCheckBox.Checked += LoopPlaylistCheckBox_Changed;
-        LoopPlaylistCheckBox.Unchecked += LoopPlaylistCheckBox_Changed;
-        
-        // Применяем общие настройки к активным медиа элементам после загрузки
-        System.Diagnostics.Debug.WriteLine($"LoadGlobalSettings: Вызываем ApplyGlobalSettings() после загрузки настроек");
-        ApplyGlobalSettings();
+        _globalSettingsUIService.LoadGlobalSettings();
     }
     
     // Применить переход между медиа элементами
@@ -4409,687 +2457,311 @@ public partial class MainWindow
         CloseSecondaryScreenWindow();
     }
     
-    // Остановить аудио в слоте
-    private void StopAudioInSlot(string slotKey)
-    {
-        if (_activeAudioSlots.TryGetValue(slotKey, out MediaElement? audioElement))
-        {
-            audioElement.Stop();
-            _activeAudioSlots.Remove(slotKey);
-            
-            if (_activeAudioContainers.TryGetValue(slotKey, out Grid? container))
-            {
-                BottomPanel.Children.Remove(container);
-                _activeAudioContainers.Remove(slotKey);
-            }
-        }
-    }
-    
     // Обработчики для перетаскивания панели настроек элемента
     private void ElementSettingsBorder_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.LeftButton == MouseButtonState.Pressed && !_isAnyResizingActive)
-        {
-            _isDraggingElementSettings = true;
-            _lastMousePosition = e.GetPosition(this);
-            ElementSettingsBorder.CaptureMouse();
-        }
+        _elementSettingsDragService.HandleMouseLeftButtonDown(sender, e, false, Services.ResizeType.None);
     }
     
     private void ElementSettingsBorder_MouseMove(object sender, MouseEventArgs e)
     {
-        if (_isDraggingElementSettings && !_isAnyResizingActive)
-        {
-            Point currentPosition = e.GetPosition(this);
-            double deltaX = currentPosition.X - _lastMousePosition.X;
-            double deltaY = currentPosition.Y - _lastMousePosition.Y;
-            
-            // Обновляем позицию панели
-            Canvas.SetLeft(ElementSettingsBorder, Canvas.GetLeft(ElementSettingsBorder) + deltaX);
-            Canvas.SetTop(ElementSettingsBorder, Canvas.GetTop(ElementSettingsBorder) + deltaY);
-            
-            _lastMousePosition = currentPosition;
-        }
+        _elementSettingsDragService.HandleMouseMove(sender, e);
     }
     
     private void ElementSettingsBorder_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        _isDraggingElementSettings = false;
-        ElementSettingsBorder.ReleaseMouseCapture();
+        _elementSettingsDragService.HandleMouseLeftButtonUp(sender, e);
     }
     
     // Обработчики для изменения размера панели настроек элемента
-    // Вертикальное растягивание
     private void ElementSettingsResizeHandleV_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        _isResizingElementSettingsV = true;
-        _isAnyResizingActive = true;
-        _lastMousePosition = e.GetPosition(this);
-        ElementSettingsResizeHandleV.CaptureMouse();
-        
-        // Останавливаем перетаскивание панели
-        _isDraggingElementSettings = false;
-        ElementSettingsBorder.ReleaseMouseCapture();
+        _elementSettingsDragService.HandleMouseLeftButtonDown(sender, e, true, Services.ResizeType.Vertical);
     }
     
     private void ElementSettingsResizeHandleV_MouseMove(object sender, MouseEventArgs e)
     {
-        if (_isResizingElementSettingsV)
-        {
-            Point currentPosition = e.GetPosition(this);
-            double deltaY = currentPosition.Y - _lastMousePosition.Y;
-            
-            if (ElementSettingsBorder.Height + deltaY >= 200) // Минимальная высота
-            {
-                ElementSettingsBorder.Height += deltaY;
-            }
-            
-            _lastMousePosition = currentPosition;
-        }
+        _elementSettingsDragService.HandleMouseMove(sender, e);
     }
     
     private void ElementSettingsResizeHandleV_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        _isResizingElementSettingsV = false;
-        _isAnyResizingActive = false;
-        ElementSettingsResizeHandleV.ReleaseMouseCapture();
+        _elementSettingsDragService.HandleMouseLeftButtonUp(sender, e);
     }
     
-    // Горизонтальное растягивание
     private void ElementSettingsResizeHandleH_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        _isResizingElementSettingsH = true;
-        _isAnyResizingActive = true;
-        _lastMousePosition = e.GetPosition(this);
-        ElementSettingsResizeHandleH.CaptureMouse();
-        
-        // Останавливаем перетаскивание панели
-        _isDraggingElementSettings = false;
-        ElementSettingsBorder.ReleaseMouseCapture();
+        _elementSettingsDragService.HandleMouseLeftButtonDown(sender, e, true, Services.ResizeType.Horizontal);
     }
     
     private void ElementSettingsResizeHandleH_MouseMove(object sender, MouseEventArgs e)
     {
-        if (_isResizingElementSettingsH)
-        {
-            Point currentPosition = e.GetPosition(this);
-            double deltaX = currentPosition.X - _lastMousePosition.X;
-            
-            if (ElementSettingsBorder.Width + deltaX >= 300) // Минимальная ширина
-            {
-                ElementSettingsBorder.Width += deltaX;
-            }
-            
-            _lastMousePosition = currentPosition;
-        }
+        _elementSettingsDragService.HandleMouseMove(sender, e);
     }
     
     private void ElementSettingsResizeHandleH_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        _isResizingElementSettingsH = false;
-        _isAnyResizingActive = false;
-        ElementSettingsResizeHandleH.ReleaseMouseCapture();
+        _elementSettingsDragService.HandleMouseLeftButtonUp(sender, e);
     }
     
-    // Диагональное растягивание
     private void ElementSettingsResizeHandleD_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        _isResizingElementSettingsD = true;
-        _isAnyResizingActive = true;
-        _lastMousePosition = e.GetPosition(this);
-        ElementSettingsResizeHandleD.CaptureMouse();
-        
-        // Останавливаем перетаскивание панели
-        _isDraggingElementSettings = false;
-        ElementSettingsBorder.ReleaseMouseCapture();
+        _elementSettingsDragService.HandleMouseLeftButtonDown(sender, e, true, Services.ResizeType.Diagonal);
     }
     
     private void ElementSettingsResizeHandleD_MouseMove(object sender, MouseEventArgs e)
     {
-        if (_isResizingElementSettingsD)
-        {
-            Point currentPosition = e.GetPosition(this);
-            double deltaX = currentPosition.X - _lastMousePosition.X;
-            double deltaY = currentPosition.Y - _lastMousePosition.Y;
-            
-            if (ElementSettingsBorder.Width + deltaX >= 300 && ElementSettingsBorder.Height + deltaY >= 200)
-            {
-                ElementSettingsBorder.Width += deltaX;
-                ElementSettingsBorder.Height += deltaY;
-            }
-            
-            _lastMousePosition = currentPosition;
-        }
+        _elementSettingsDragService.HandleMouseMove(sender, e);
     }
     
     private void ElementSettingsResizeHandleD_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        _isResizingElementSettingsD = false;
-        _isAnyResizingActive = false;
-        ElementSettingsResizeHandleD.ReleaseMouseCapture();
+        _elementSettingsDragService.HandleMouseLeftButtonUp(sender, e);
     }
     
     // Обработчики для перетаскивания панели общих настроек
     private void GlobalSettingsBorder_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.LeftButton == MouseButtonState.Pressed && !_isAnyResizingActive)
-        {
-            _isDraggingGlobalSettings = true;
-            _lastMousePosition = e.GetPosition(this);
-            GlobalSettingsBorder.CaptureMouse();
-        }
+        _globalSettingsDragService.HandleMouseLeftButtonDown(sender, e, false, Services.ResizeType.None);
     }
     
     private void GlobalSettingsBorder_MouseMove(object sender, MouseEventArgs e)
     {
-        if (_isDraggingGlobalSettings && !_isAnyResizingActive)
-        {
-            Point currentPosition = e.GetPosition(this);
-            double deltaX = currentPosition.X - _lastMousePosition.X;
-            double deltaY = currentPosition.Y - _lastMousePosition.Y;
-            
-            // Обновляем позицию панели
-            Canvas.SetLeft(GlobalSettingsBorder, Canvas.GetLeft(GlobalSettingsBorder) + deltaX);
-            Canvas.SetTop(GlobalSettingsBorder, Canvas.GetTop(GlobalSettingsBorder) + deltaY);
-            
-            _lastMousePosition = currentPosition;
-        }
+        _globalSettingsDragService.HandleMouseMove(sender, e);
     }
     
     private void GlobalSettingsBorder_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        _isDraggingGlobalSettings = false;
-        GlobalSettingsBorder.ReleaseMouseCapture();
+        _globalSettingsDragService.HandleMouseLeftButtonUp(sender, e);
     }
     
     // Обработчики для изменения размера панели общих настроек
-    // Вертикальное растягивание
     private void GlobalSettingsResizeHandleV_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        _isResizingGlobalSettingsV = true;
-        _isAnyResizingActive = true;
-        _lastMousePosition = e.GetPosition(this);
-        GlobalSettingsResizeHandleV.CaptureMouse();
-        
-        // Останавливаем перетаскивание панели
-        _isDraggingGlobalSettings = false;
-        GlobalSettingsBorder.ReleaseMouseCapture();
+        _globalSettingsDragService.HandleMouseLeftButtonDown(sender, e, true, Services.ResizeType.Vertical);
     }
     
     private void GlobalSettingsResizeHandleV_MouseMove(object sender, MouseEventArgs e)
     {
-        if (_isResizingGlobalSettingsV)
-        {
-            Point currentPosition = e.GetPosition(this);
-            double deltaY = currentPosition.Y - _lastMousePosition.Y;
-            
-            if (GlobalSettingsBorder.Height + deltaY >= 200) // Минимальная высота
-            {
-                GlobalSettingsBorder.Height += deltaY;
-            }
-            
-            _lastMousePosition = currentPosition;
-        }
+        _globalSettingsDragService.HandleMouseMove(sender, e);
     }
     
     private void GlobalSettingsResizeHandleV_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        _isResizingGlobalSettingsV = false;
-        _isAnyResizingActive = false;
-        GlobalSettingsResizeHandleV.ReleaseMouseCapture();
+        _globalSettingsDragService.HandleMouseLeftButtonUp(sender, e);
     }
     
-    // Горизонтальное растягивание
     private void GlobalSettingsResizeHandleH_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        _isResizingGlobalSettingsH = true;
-        _isAnyResizingActive = true;
-        _lastMousePosition = e.GetPosition(this);
-        GlobalSettingsResizeHandleH.CaptureMouse();
-        
-        // Останавливаем перетаскивание панели
-        _isDraggingGlobalSettings = false;
-        GlobalSettingsBorder.ReleaseMouseCapture();
+        _globalSettingsDragService.HandleMouseLeftButtonDown(sender, e, true, Services.ResizeType.Horizontal);
     }
     
     private void GlobalSettingsResizeHandleH_MouseMove(object sender, MouseEventArgs e)
     {
-        if (_isResizingGlobalSettingsH)
-        {
-            Point currentPosition = e.GetPosition(this);
-            double deltaX = currentPosition.X - _lastMousePosition.X;
-            
-            if (GlobalSettingsBorder.Width + deltaX >= 300) // Минимальная ширина
-            {
-                GlobalSettingsBorder.Width += deltaX;
-            }
-            
-            _lastMousePosition = currentPosition;
-        }
+        _globalSettingsDragService.HandleMouseMove(sender, e);
     }
     
     private void GlobalSettingsResizeHandleH_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        _isResizingGlobalSettingsH = false;
-        _isAnyResizingActive = false;
-        GlobalSettingsResizeHandleH.ReleaseMouseCapture();
+        _globalSettingsDragService.HandleMouseLeftButtonUp(sender, e);
     }
     
-    // Диагональное растягивание
     private void GlobalSettingsResizeHandleD_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        _isResizingGlobalSettingsD = true;
-        _isAnyResizingActive = true;
-        _lastMousePosition = e.GetPosition(this);
-        GlobalSettingsResizeHandleD.CaptureMouse();
-        
-        // Останавливаем перетаскивание панели
-        _isDraggingGlobalSettings = false;
-        GlobalSettingsBorder.ReleaseMouseCapture();
+        _globalSettingsDragService.HandleMouseLeftButtonDown(sender, e, true, Services.ResizeType.Diagonal);
     }
     
     private void GlobalSettingsResizeHandleD_MouseMove(object sender, MouseEventArgs e)
     {
-        if (_isResizingGlobalSettingsD)
-        {
-            Point currentPosition = e.GetPosition(this);
-            double deltaX = currentPosition.X - _lastMousePosition.X;
-            double deltaY = currentPosition.Y - _lastMousePosition.Y;
-            
-            if (GlobalSettingsBorder.Width + deltaX >= 300 && GlobalSettingsBorder.Height + deltaY >= 200)
-            {
-                GlobalSettingsBorder.Width += deltaX;
-                GlobalSettingsBorder.Height += deltaY;
-            }
-            
-            _lastMousePosition = currentPosition;
-        }
+        _globalSettingsDragService.HandleMouseMove(sender, e);
     }
     
     private void GlobalSettingsResizeHandleD_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        _isResizingGlobalSettingsD = false;
-        _isAnyResizingActive = false;
-        GlobalSettingsResizeHandleD.ReleaseMouseCapture();
+        _globalSettingsDragService.HandleMouseLeftButtonUp(sender, e);
     }
     
     // Обработчики для перетаскивания медиаплеера
     private void MediaPlayerBorder_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.LeftButton == MouseButtonState.Pressed && !_isAnyResizingActive)
-        {
-            _isDraggingMediaPlayer = true;
-            _lastMousePosition = e.GetPosition(this);
-            MediaPlayerBorder.CaptureMouse();
-        }
+        _mediaPlayerDragService.HandleMouseLeftButtonDown(sender, e, false, Services.ResizeType.None);
     }
     
     private void MediaPlayerBorder_MouseMove(object sender, MouseEventArgs e)
     {
-        if (_isDraggingMediaPlayer && !_isAnyResizingActive)
-        {
-            Point currentPosition = e.GetPosition(this);
-            double deltaX = currentPosition.X - _lastMousePosition.X;
-            double deltaY = currentPosition.Y - _lastMousePosition.Y;
-            
-            // Обновляем позицию панели
-            Canvas.SetLeft(MediaPlayerBorder, Canvas.GetLeft(MediaPlayerBorder) + deltaX);
-            Canvas.SetTop(MediaPlayerBorder, Canvas.GetTop(MediaPlayerBorder) + deltaY);
-            
-            _lastMousePosition = currentPosition;
-        }
+        _mediaPlayerDragService.HandleMouseMove(sender, e);
     }
     
     private void MediaPlayerBorder_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        _isDraggingMediaPlayer = false;
-        MediaPlayerBorder.ReleaseMouseCapture();
+        _mediaPlayerDragService.HandleMouseLeftButtonUp(sender, e);
     }
     
     // Обработчики для изменения размера медиаплеера
-    // Вертикальное растягивание
     private void MediaPlayerResizeHandleV_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        _isResizingMediaPlayerV = true;
-        _isAnyResizingActive = true;
-        _lastMousePosition = e.GetPosition(this);
-        MediaPlayerResizeHandleV.CaptureMouse();
-        
-        // Останавливаем перетаскивание панели
-        _isDraggingMediaPlayer = false;
-        MediaPlayerBorder.ReleaseMouseCapture();
+        _mediaPlayerDragService.HandleMouseLeftButtonDown(sender, e, true, Services.ResizeType.Vertical);
     }
     
     private void MediaPlayerResizeHandleV_MouseMove(object sender, MouseEventArgs e)
     {
-        if (_isResizingMediaPlayerV)
-        {
-            Point currentPosition = e.GetPosition(this);
-            double deltaY = currentPosition.Y - _lastMousePosition.Y;
-            
-            if (MediaPlayerBorder.Height + deltaY >= 300) // Минимальная высота
-            {
-                MediaPlayerBorder.Height += deltaY;
-            }
-            
-            _lastMousePosition = currentPosition;
-        }
+        _mediaPlayerDragService.HandleMouseMove(sender, e);
     }
     
     private void MediaPlayerResizeHandleV_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        _isResizingMediaPlayerV = false;
-        _isAnyResizingActive = false;
-        MediaPlayerResizeHandleV.ReleaseMouseCapture();
+        _mediaPlayerDragService.HandleMouseLeftButtonUp(sender, e);
     }
     
-    // Горизонтальное растягивание
     private void MediaPlayerResizeHandleH_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        _isResizingMediaPlayerH = true;
-        _isAnyResizingActive = true;
-        _lastMousePosition = e.GetPosition(this);
-        MediaPlayerResizeHandleH.CaptureMouse();
-        
-        // Останавливаем перетаскивание панели
-        _isDraggingMediaPlayer = false;
-        MediaPlayerBorder.ReleaseMouseCapture();
+        _mediaPlayerDragService.HandleMouseLeftButtonDown(sender, e, true, Services.ResizeType.Horizontal);
     }
     
     private void MediaPlayerResizeHandleH_MouseMove(object sender, MouseEventArgs e)
     {
-        if (_isResizingMediaPlayerH)
-        {
-            Point currentPosition = e.GetPosition(this);
-            double deltaX = currentPosition.X - _lastMousePosition.X;
-            
-            if (MediaPlayerBorder.Width + deltaX >= 400) // Минимальная ширина
-            {
-                MediaPlayerBorder.Width += deltaX;
-            }
-            
-            _lastMousePosition = currentPosition;
-        }
+        _mediaPlayerDragService.HandleMouseMove(sender, e);
     }
     
     private void MediaPlayerResizeHandleH_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        _isResizingMediaPlayerH = false;
-        _isAnyResizingActive = false;
-        MediaPlayerResizeHandleH.ReleaseMouseCapture();
+        _mediaPlayerDragService.HandleMouseLeftButtonUp(sender, e);
     }
     
-    // Диагональное растягивание
     private void MediaPlayerResizeHandleD_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        _isResizingMediaPlayerD = true;
-        _isAnyResizingActive = true;
-        _lastMousePosition = e.GetPosition(this);
-        MediaPlayerResizeHandleD.CaptureMouse();
-        
-        // Останавливаем перетаскивание панели
-        _isDraggingMediaPlayer = false;
-        MediaPlayerBorder.ReleaseMouseCapture();
+        _mediaPlayerDragService.HandleMouseLeftButtonDown(sender, e, true, Services.ResizeType.Diagonal);
     }
     
     private void MediaPlayerResizeHandleD_MouseMove(object sender, MouseEventArgs e)
     {
-        if (_isResizingMediaPlayerD)
-        {
-            Point currentPosition = e.GetPosition(this);
-            double deltaX = currentPosition.X - _lastMousePosition.X;
-            double deltaY = currentPosition.Y - _lastMousePosition.Y;
-            
-            if (MediaPlayerBorder.Width + deltaX >= 400 && MediaPlayerBorder.Height + deltaY >= 300)
-            {
-                MediaPlayerBorder.Width += deltaX;
-                MediaPlayerBorder.Height += deltaY;
-            }
-            
-            _lastMousePosition = currentPosition;
-        }
+        _mediaPlayerDragService.HandleMouseMove(sender, e);
     }
     
     private void MediaPlayerResizeHandleD_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        _isResizingMediaPlayerD = false;
-        _isAnyResizingActive = false;
-        MediaPlayerResizeHandleD.ReleaseMouseCapture();
+        _mediaPlayerDragService.HandleMouseLeftButtonUp(sender, e);
     }
     
     // Обработчики для перетаскивания панели медиа-клеток
     private void MediaCellsBorder_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.LeftButton == MouseButtonState.Pressed && !_isAnyResizingActive)
-        {
-            _isDraggingMediaCells = true;
-            _lastMousePosition = e.GetPosition(this);
-            MediaCellsBorder.CaptureMouse();
-        }
+        _mediaCellsDragService.HandleMouseLeftButtonDown(sender, e, false, Services.ResizeType.None);
     }
     
     private void MediaCellsBorder_MouseMove(object sender, MouseEventArgs e)
     {
-        if (_isDraggingMediaCells && !_isAnyResizingActive)
-        {
-            Point currentPosition = e.GetPosition(this);
-            double deltaX = currentPosition.X - _lastMousePosition.X;
-            double deltaY = currentPosition.Y - _lastMousePosition.Y;
-            
-            // Обновляем позицию панели
-            Canvas.SetLeft(MediaCellsBorder, Canvas.GetLeft(MediaCellsBorder) + deltaX);
-            Canvas.SetBottom(MediaCellsBorder, Canvas.GetBottom(MediaCellsBorder) - deltaY);
-            
-            _lastMousePosition = currentPosition;
-        }
+        _mediaCellsDragService.HandleMouseMove(sender, e);
     }
     
     private void MediaCellsBorder_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        _isDraggingMediaCells = false;
-        MediaCellsBorder.ReleaseMouseCapture();
+        _mediaCellsDragService.HandleMouseLeftButtonUp(sender, e);
     }
     
     // Обработчики для изменения размера панели медиа-клеток
-    // Вертикальное растягивание
     private void MediaCellsResizeHandleV_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        _isResizingMediaCellsV = true;
-        _isAnyResizingActive = true;
-        _lastMousePosition = e.GetPosition(this);
-        MediaCellsResizeHandleV.CaptureMouse();
-        
-        // Останавливаем перетаскивание панели
-        _isDraggingMediaCells = false;
-        MediaCellsBorder.ReleaseMouseCapture();
+        _mediaCellsDragService.HandleMouseLeftButtonDown(sender, e, true, Services.ResizeType.Vertical);
     }
     
     private void MediaCellsResizeHandleV_MouseMove(object sender, MouseEventArgs e)
     {
-        if (_isResizingMediaCellsV)
-        {
-            Point currentPosition = e.GetPosition(this);
-            double deltaY = currentPosition.Y - _lastMousePosition.Y;
-            
-            if (MediaCellsBorder.Height - deltaY >= 200) // Минимальная высота
-            {
-                MediaCellsBorder.Height -= deltaY;
-                Canvas.SetBottom(MediaCellsBorder, Canvas.GetBottom(MediaCellsBorder) + deltaY);
-            }
-            
-            _lastMousePosition = currentPosition;
-        }
+        _mediaCellsDragService.HandleMouseMove(sender, e);
     }
     
     private void MediaCellsResizeHandleV_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        _isResizingMediaCellsV = false;
-        _isAnyResizingActive = false;
-        MediaCellsResizeHandleV.ReleaseMouseCapture();
+        _mediaCellsDragService.HandleMouseLeftButtonUp(sender, e);
     }
     
-    // Горизонтальное растягивание
     private void MediaCellsResizeHandleH_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        _isResizingMediaCellsH = true;
-        _isAnyResizingActive = true;
-        _lastMousePosition = e.GetPosition(this);
-        MediaCellsResizeHandleH.CaptureMouse();
-        
-        // Останавливаем перетаскивание панели
-        _isDraggingMediaCells = false;
-        MediaCellsBorder.ReleaseMouseCapture();
+        _mediaCellsDragService.HandleMouseLeftButtonDown(sender, e, true, Services.ResizeType.Horizontal);
     }
     
     private void MediaCellsResizeHandleH_MouseMove(object sender, MouseEventArgs e)
     {
-        if (_isResizingMediaCellsH)
-        {
-            Point currentPosition = e.GetPosition(this);
-            double deltaX = currentPosition.X - _lastMousePosition.X;
-            
-            if (MediaCellsBorder.Width + deltaX >= 400) // Минимальная ширина
-            {
-                MediaCellsBorder.Width += deltaX;
-            }
-            
-            _lastMousePosition = currentPosition;
-        }
+        _mediaCellsDragService.HandleMouseMove(sender, e);
     }
     
     private void MediaCellsResizeHandleH_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        _isResizingMediaCellsH = false;
-        _isAnyResizingActive = false;
-        MediaCellsResizeHandleH.ReleaseMouseCapture();
+        _mediaCellsDragService.HandleMouseLeftButtonUp(sender, e);
     }
     
-    // Диагональное растягивание
     private void MediaCellsResizeHandleD_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        _isResizingMediaCellsD = true;
-        _isAnyResizingActive = true;
-        _lastMousePosition = e.GetPosition(this);
-        MediaCellsResizeHandleD.CaptureMouse();
-        
-        // Останавливаем перетаскивание панели
-        _isDraggingMediaCells = false;
-        MediaCellsBorder.ReleaseMouseCapture();
+        _mediaCellsDragService.HandleMouseLeftButtonDown(sender, e, true, Services.ResizeType.Diagonal);
     }
     
     private void MediaCellsResizeHandleD_MouseMove(object sender, MouseEventArgs e)
     {
-        if (_isResizingMediaCellsD)
-        {
-            Point currentPosition = e.GetPosition(this);
-            double deltaX = currentPosition.X - _lastMousePosition.X;
-            double deltaY = currentPosition.Y - _lastMousePosition.Y;
-            
-            if (MediaCellsBorder.Width + deltaX >= 400 && MediaCellsBorder.Height - deltaY >= 200)
-            {
-                MediaCellsBorder.Width += deltaX;
-                MediaCellsBorder.Height -= deltaY;
-                Canvas.SetBottom(MediaCellsBorder, Canvas.GetBottom(MediaCellsBorder) + deltaY);
-            }
-            
-            _lastMousePosition = currentPosition;
-        }
+        _mediaCellsDragService.HandleMouseMove(sender, e);
     }
     
     private void MediaCellsResizeHandleD_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        _isResizingMediaCellsD = false;
-        _isAnyResizingActive = false;
-        MediaCellsResizeHandleD.ReleaseMouseCapture();
+        _mediaCellsDragService.HandleMouseLeftButtonUp(sender, e);
     }
     
-    // Обработчики MouseEnter/MouseLeave для визуальной обратной связи
-    // Панель настроек элемента
-    private void ElementSettingsResizeHandleV_MouseEnter(object sender, MouseEventArgs e) => ((Border)sender).Opacity = 1.0;
-    private void ElementSettingsResizeHandleV_MouseLeave(object sender, MouseEventArgs e) => ((Border)sender).Opacity = 0.7;
-    private void ElementSettingsResizeHandleH_MouseEnter(object sender, MouseEventArgs e) => ((Border)sender).Opacity = 1.0;
-    private void ElementSettingsResizeHandleH_MouseLeave(object sender, MouseEventArgs e) => ((Border)sender).Opacity = 0.7;
-    private void ElementSettingsResizeHandleD_MouseEnter(object sender, MouseEventArgs e) => ((Border)sender).Opacity = 1.0;
-    private void ElementSettingsResizeHandleD_MouseLeave(object sender, MouseEventArgs e) => ((Border)sender).Opacity = 0.7;
+    // Обработчики MouseEnter/MouseLeave для визуальной обратной связи (используются напрямую из PanelDragService)
+    private void ResizeHandle_MouseEnter(object sender, MouseEventArgs e)
+    {
+        if (sender is FrameworkElement element)
+        {
+            element.Opacity = 1.0;
+        }
+    }
     
-    // Панель общих настроек
-    private void GlobalSettingsResizeHandleV_MouseEnter(object sender, MouseEventArgs e) => ((Border)sender).Opacity = 1.0;
-    private void GlobalSettingsResizeHandleV_MouseLeave(object sender, MouseEventArgs e) => ((Border)sender).Opacity = 0.7;
-    private void GlobalSettingsResizeHandleH_MouseEnter(object sender, MouseEventArgs e) => ((Border)sender).Opacity = 1.0;
-    private void GlobalSettingsResizeHandleH_MouseLeave(object sender, MouseEventArgs e) => ((Border)sender).Opacity = 0.7;
-    private void GlobalSettingsResizeHandleD_MouseEnter(object sender, MouseEventArgs e) => ((Border)sender).Opacity = 1.0;
-    private void GlobalSettingsResizeHandleD_MouseLeave(object sender, MouseEventArgs e) => ((Border)sender).Opacity = 0.7;
+    private void ResizeHandle_MouseLeave(object sender, MouseEventArgs e)
+    {
+        if (sender is FrameworkElement element)
+        {
+            element.Opacity = 0.7;
+        }
+    }
     
-    // Медиаплеер
-    private void MediaPlayerResizeHandleV_MouseEnter(object sender, MouseEventArgs e) => ((Border)sender).Opacity = 1.0;
-    private void MediaPlayerResizeHandleV_MouseLeave(object sender, MouseEventArgs e) => ((Border)sender).Opacity = 0.7;
-    private void MediaPlayerResizeHandleH_MouseEnter(object sender, MouseEventArgs e) => ((Border)sender).Opacity = 1.0;
-    private void MediaPlayerResizeHandleH_MouseLeave(object sender, MouseEventArgs e) => ((Border)sender).Opacity = 0.7;
-    private void MediaPlayerResizeHandleD_MouseEnter(object sender, MouseEventArgs e) => ((Border)sender).Opacity = 1.0;
-    private void MediaPlayerResizeHandleD_MouseLeave(object sender, MouseEventArgs e) => ((Border)sender).Opacity = 0.7;
+    // Обработчики для ElementSettings ResizeHandle
+    private void ElementSettingsResizeHandleV_MouseEnter(object sender, MouseEventArgs e) => ResizeHandle_MouseEnter(sender, e);
+    private void ElementSettingsResizeHandleV_MouseLeave(object sender, MouseEventArgs e) => ResizeHandle_MouseLeave(sender, e);
+    private void ElementSettingsResizeHandleH_MouseEnter(object sender, MouseEventArgs e) => ResizeHandle_MouseEnter(sender, e);
+    private void ElementSettingsResizeHandleH_MouseLeave(object sender, MouseEventArgs e) => ResizeHandle_MouseLeave(sender, e);
+    private void ElementSettingsResizeHandleD_MouseEnter(object sender, MouseEventArgs e) => ResizeHandle_MouseEnter(sender, e);
+    private void ElementSettingsResizeHandleD_MouseLeave(object sender, MouseEventArgs e) => ResizeHandle_MouseLeave(sender, e);
     
-    // Панель медиа-клеток
-    private void MediaCellsResizeHandleV_MouseEnter(object sender, MouseEventArgs e) => ((Border)sender).Opacity = 1.0;
-    private void MediaCellsResizeHandleV_MouseLeave(object sender, MouseEventArgs e) => ((Border)sender).Opacity = 0.7;
-    private void MediaCellsResizeHandleH_MouseEnter(object sender, MouseEventArgs e) => ((Border)sender).Opacity = 1.0;
-    private void MediaCellsResizeHandleH_MouseLeave(object sender, MouseEventArgs e) => ((Border)sender).Opacity = 0.7;
-    private void MediaCellsResizeHandleD_MouseEnter(object sender, MouseEventArgs e) => ((Border)sender).Opacity = 1.0;
-    private void MediaCellsResizeHandleD_MouseLeave(object sender, MouseEventArgs e) => ((Border)sender).Opacity = 0.7;
+    // Обработчики для GlobalSettings ResizeHandle
+    private void GlobalSettingsResizeHandleV_MouseEnter(object sender, MouseEventArgs e) => ResizeHandle_MouseEnter(sender, e);
+    private void GlobalSettingsResizeHandleV_MouseLeave(object sender, MouseEventArgs e) => ResizeHandle_MouseLeave(sender, e);
+    private void GlobalSettingsResizeHandleH_MouseEnter(object sender, MouseEventArgs e) => ResizeHandle_MouseEnter(sender, e);
+    private void GlobalSettingsResizeHandleH_MouseLeave(object sender, MouseEventArgs e) => ResizeHandle_MouseLeave(sender, e);
+    private void GlobalSettingsResizeHandleD_MouseEnter(object sender, MouseEventArgs e) => ResizeHandle_MouseEnter(sender, e);
+    private void GlobalSettingsResizeHandleD_MouseLeave(object sender, MouseEventArgs e) => ResizeHandle_MouseLeave(sender, e);
+    
+    // Обработчики для MediaPlayer ResizeHandle
+    private void MediaPlayerResizeHandleV_MouseEnter(object sender, MouseEventArgs e) => ResizeHandle_MouseEnter(sender, e);
+    private void MediaPlayerResizeHandleV_MouseLeave(object sender, MouseEventArgs e) => ResizeHandle_MouseLeave(sender, e);
+    private void MediaPlayerResizeHandleH_MouseEnter(object sender, MouseEventArgs e) => ResizeHandle_MouseEnter(sender, e);
+    private void MediaPlayerResizeHandleH_MouseLeave(object sender, MouseEventArgs e) => ResizeHandle_MouseLeave(sender, e);
+    private void MediaPlayerResizeHandleD_MouseEnter(object sender, MouseEventArgs e) => ResizeHandle_MouseEnter(sender, e);
+    private void MediaPlayerResizeHandleD_MouseLeave(object sender, MouseEventArgs e) => ResizeHandle_MouseLeave(sender, e);
+    
+    // Обработчики для MediaCells ResizeHandle
+    private void MediaCellsResizeHandleV_MouseEnter(object sender, MouseEventArgs e) => ResizeHandle_MouseEnter(sender, e);
+    private void MediaCellsResizeHandleV_MouseLeave(object sender, MouseEventArgs e) => ResizeHandle_MouseLeave(sender, e);
+    private void MediaCellsResizeHandleH_MouseEnter(object sender, MouseEventArgs e) => ResizeHandle_MouseEnter(sender, e);
+    private void MediaCellsResizeHandleH_MouseLeave(object sender, MouseEventArgs e) => ResizeHandle_MouseLeave(sender, e);
+    private void MediaCellsResizeHandleD_MouseEnter(object sender, MouseEventArgs e) => ResizeHandle_MouseEnter(sender, e);
+    private void MediaCellsResizeHandleD_MouseLeave(object sender, MouseEventArgs e) => ResizeHandle_MouseLeave(sender, e);
     
     // Методы для сохранения и загрузки позиций панелей
     private void SavePanelPositions()
     {
-        if (_projectManager?.CurrentProject?.GlobalSettings == null) return;
-        
-        var settings = _projectManager.CurrentProject.GlobalSettings;
-        
-        // Сохраняем позиции и размеры панелей
-        settings.ElementSettingsPanel.Left = Canvas.GetLeft(ElementSettingsBorder);
-        settings.ElementSettingsPanel.Top = Canvas.GetTop(ElementSettingsBorder);
-        settings.ElementSettingsPanel.Width = ElementSettingsBorder.Width;
-        settings.ElementSettingsPanel.Height = ElementSettingsBorder.Height;
-        
-        settings.GlobalSettingsPanel.Left = Canvas.GetLeft(GlobalSettingsBorder);
-        settings.GlobalSettingsPanel.Top = Canvas.GetTop(GlobalSettingsBorder);
-        settings.GlobalSettingsPanel.Width = GlobalSettingsBorder.Width;
-        settings.GlobalSettingsPanel.Height = GlobalSettingsBorder.Height;
-        
-        settings.MediaPlayerPanel.Left = Canvas.GetLeft(MediaPlayerBorder);
-        settings.MediaPlayerPanel.Top = Canvas.GetTop(MediaPlayerBorder);
-        settings.MediaPlayerPanel.Width = MediaPlayerBorder.Width;
-        settings.MediaPlayerPanel.Height = MediaPlayerBorder.Height;
-        
-        settings.MediaCellsPanel.Left = Canvas.GetLeft(MediaCellsBorder);
-        settings.MediaCellsPanel.Top = Canvas.GetBottom(MediaCellsBorder);
-        settings.MediaCellsPanel.Width = MediaCellsBorder.Width;
-        settings.MediaCellsPanel.Height = MediaCellsBorder.Height;
+        _panelPositionService.SavePanelPositions();
     }
     
     private void LoadPanelPositions()
     {
-        if (_projectManager?.CurrentProject?.GlobalSettings == null) return;
-        
-        var settings = _projectManager.CurrentProject.GlobalSettings;
-        
-        // Загружаем позиции и размеры панелей
-        Canvas.SetLeft(ElementSettingsBorder, settings.ElementSettingsPanel.Left);
-        Canvas.SetTop(ElementSettingsBorder, settings.ElementSettingsPanel.Top);
-        ElementSettingsBorder.Width = settings.ElementSettingsPanel.Width;
-        ElementSettingsBorder.Height = settings.ElementSettingsPanel.Height;
-        
-        Canvas.SetLeft(GlobalSettingsBorder, settings.GlobalSettingsPanel.Left);
-        Canvas.SetTop(GlobalSettingsBorder, settings.GlobalSettingsPanel.Top);
-        GlobalSettingsBorder.Width = settings.GlobalSettingsPanel.Width;
-        GlobalSettingsBorder.Height = settings.GlobalSettingsPanel.Height;
-        
-        Canvas.SetLeft(MediaPlayerBorder, settings.MediaPlayerPanel.Left);
-        Canvas.SetTop(MediaPlayerBorder, settings.MediaPlayerPanel.Top);
-        MediaPlayerBorder.Width = settings.MediaPlayerPanel.Width;
-        MediaPlayerBorder.Height = settings.MediaPlayerPanel.Height;
-        
-        Canvas.SetLeft(MediaCellsBorder, settings.MediaCellsPanel.Left);
-        Canvas.SetBottom(MediaCellsBorder, settings.MediaCellsPanel.Top);
-        MediaCellsBorder.Width = settings.MediaCellsPanel.Width;
-        MediaCellsBorder.Height = settings.MediaCellsPanel.Height;
+        _panelPositionService.LoadPanelPositions();
     }
 }

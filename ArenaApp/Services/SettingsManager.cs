@@ -19,6 +19,34 @@ namespace ArenaApp.Services
             _globalSettings = settings;
         }
         
+        public GlobalSettings? GetGlobalSettings()
+        {
+            return _globalSettings;
+        }
+        
+        /// <summary>
+        /// Применяет масштаб и поворот к элементу с правильным центром
+        /// </summary>
+        public void ApplyScaleAndRotation(FrameworkElement element, double scale, double rotation)
+        {
+            if (element == null) return;
+            
+            var transform = new TransformGroup();
+            transform.Children.Add(new ScaleTransform(scale, scale));
+            transform.Children.Add(new RotateTransform(rotation));
+            element.RenderTransform = transform;
+            
+            // Для медиа элементов (MediaElement, Image) устанавливаем точку поворота в центр медиаплеера
+            if (element is MediaElement || element is Image)
+            {
+                element.RenderTransformOrigin = new Point(0.5, 0.5); // Центр медиаплеера
+            }
+            else
+            {
+                element.RenderTransformOrigin = new Point(0.5, 0.5); // Центр элемента для других типов
+            }
+        }
+        
         // Методы для получения финальных значений с учетом общих настроек
         public double GetFinalVolume(double elementVolume)
         {

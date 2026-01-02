@@ -107,12 +107,51 @@ namespace ArenaApp.Services
             {
                 // Устанавливаем правильный Stretch для медиа
                 mediaElement.Stretch = Stretch.Uniform;
-                mediaElement.HorizontalAlignment = HorizontalAlignment.Center;
-                mediaElement.VerticalAlignment = VerticalAlignment.Center;
                 
-                // Удаляем старый MediaElement если есть
+                // КРИТИЧНО: Используем Stretch выравнивания БЕЗ установки Width/Height
+                // Это позволяет mediaElement автоматически заполнять доступное пространство
+                mediaElement.HorizontalAlignment = HorizontalAlignment.Stretch;
+                mediaElement.VerticalAlignment = VerticalAlignment.Stretch;
+                mediaElement.Width = double.NaN; // Auto - позволяет растягиваться
+                mediaElement.Height = double.NaN; // Auto - позволяет растягиваться
+                
+                // КРИТИЧНО: Если размеры доступны, обновляем их после загрузки элемента
+                if (mediaBorder.ActualWidth > 0 && mediaBorder.ActualHeight > 0)
+                {
+                    // Размеры будут установлены автоматически через Stretch выравнивания
+                    System.Diagnostics.Debug.WriteLine($"UpdateMediaElement: mediaBorder размеры доступны - Width={mediaBorder.ActualWidth}, Height={mediaBorder.ActualHeight}");
+                }
+                else
+                {
+                    // Подписываемся на событие загрузки mediaBorder для обновления размеров
+                    mediaBorder.Loaded += (s, e) =>
+                    {
+                        if (mediaBorder.ActualWidth > 0 && mediaBorder.ActualHeight > 0)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"UpdateMediaElement (Loaded): mediaBorder размеры стали доступны - Width={mediaBorder.ActualWidth}, Height={mediaBorder.ActualHeight}");
+                        }
+                    };
+                }
+                
+                // ВАЖНО: Устанавливаем видимость и прозрачность сразу
+                mediaElement.Visibility = Visibility.Visible;
+                if (mediaElement.Opacity <= 0)
+                {
+                    mediaElement.Opacity = 1.0;
+                }
+                if (mediaBorder != null)
+                {
+                    mediaBorder.Visibility = Visibility.Visible;
+                    mediaBorder.Opacity = 1.0;
+                }
+                
+                // КРИТИЧНО: Убеждаемся, что mediaElement находится в Grid ПЕРЕД textOverlayGrid
+                // В Grid порядок элементов определяет Z-индекс - последний элемент поверх остальных
+                // Поэтому mediaElement должен быть первым (индекс 0), а textOverlayGrid - последним
+                
+                // Удаляем старый MediaElement если есть (но не тот же самый объект)
                 var oldMediaElement = mainGrid.Children.OfType<MediaElement>().FirstOrDefault();
-                if (oldMediaElement != null)
+                if (oldMediaElement != null && oldMediaElement != mediaElement)
                 {
                     mainGrid.Children.Remove(oldMediaElement);
                 }
@@ -124,13 +163,38 @@ namespace ArenaApp.Services
                     mainGrid.Children.Remove(oldImage);
                 }
                 
-                // Добавляем новый MediaElement в начало (под текстом)
-                mainGrid.Children.Insert(0, mediaElement);
-                
-                // Убеждаемся, что textOverlayGrid остается в Grid
-                if (!mainGrid.Children.Contains(textOverlayGrid))
+                // Временно удаляем textOverlayGrid, чтобы правильно установить порядок
+                if (mainGrid.Children.Contains(textOverlayGrid))
                 {
-                    mainGrid.Children.Add(textOverlayGrid);
+                    mainGrid.Children.Remove(textOverlayGrid);
+                }
+                
+                // Добавляем MediaElement первым (индекс 0) - он будет внизу
+                if (!mainGrid.Children.Contains(mediaElement))
+                {
+                    mainGrid.Children.Insert(0, mediaElement);
+                }
+                else
+                {
+                    // Если mediaElement уже есть, перемещаем его на первое место
+                    var currentIndex = mainGrid.Children.IndexOf(mediaElement);
+                    if (currentIndex > 0)
+                    {
+                        mainGrid.Children.RemoveAt(currentIndex);
+                        mainGrid.Children.Insert(0, mediaElement);
+                    }
+                }
+                
+                // Добавляем textOverlayGrid последним - он будет поверх mediaElement
+                mainGrid.Children.Add(textOverlayGrid);
+                
+                // КРИТИЧНО: Убеждаемся, что textOverlayGrid полностью прозрачен и не перекрывает видео
+                textOverlayGrid.Background = new SolidColorBrush(Colors.Transparent);
+                textOverlayGrid.IsHitTestVisible = false; // Позволяет событиям проходить сквозь к mediaElement
+                // КРИТИЧНО: Убеждаемся, что textOverlayGrid не имеет непрозрачного фона
+                if (textOverlayGrid.Background is SolidColorBrush brush && brush.Color.A > 0)
+                {
+                    textOverlayGrid.Background = new SolidColorBrush(Colors.Transparent);
                 }
                 
                 // Делаем textOverlayGrid невидимым если в нем нет текста
@@ -383,16 +447,33 @@ namespace ArenaApp.Services
         {
             try
             {
+                System.Diagnostics.Debug.WriteLine($"=== LoadMediaFromSlotSelective НАЧАЛО ===");
+                System.Diagnostics.Debug.WriteLine($"LoadMediaFromSlotSelective: Проверка 1 - метод начался");
+                System.Diagnostics.Debug.WriteLine($"Type={mediaSlot.Type}, Path={mediaSlot.MediaPath}, Column={mediaSlot.Column}, Row={mediaSlot.Row}");
+                System.Diagnostics.Debug.WriteLine($"LoadMediaFromSlotSelective: Проверка 2 - параметры выведены");
+                
                 string slotKey = $"Slot_{mediaSlot.Column}_{mediaSlot.Row}";
+                System.Diagnostics.Debug.WriteLine($"LoadMediaFromSlotSelective: slotKey={slotKey}");
                 
                 // Настраиваем аудиоустройство если нужно
+                System.Diagnostics.Debug.WriteLine($"LoadMediaFromSlotSelective: Вызываем ConfigureAudioDevice");
                 ConfigureAudioDevice?.Invoke();
+                System.Diagnostics.Debug.WriteLine($"LoadMediaFromSlotSelective: ConfigureAudioDevice завершен");
                 
+                System.Diagnostics.Debug.WriteLine($"LoadMediaFromSlotSelective: Получаем элементы UI");
                 var mediaElement = GetMainMediaElement?.Invoke();
                 var mediaBorder = GetMediaBorder?.Invoke();
                 var textOverlayGrid = GetTextOverlayGrid?.Invoke();
+                System.Diagnostics.Debug.WriteLine($"LoadMediaFromSlotSelective: Элементы получены - mediaElement={mediaElement != null}, mediaBorder={mediaBorder != null}, textOverlayGrid={textOverlayGrid != null}");
                 
-                if (mediaElement == null || mediaBorder == null || textOverlayGrid == null) return;
+                if (mediaElement == null || mediaBorder == null || textOverlayGrid == null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"ОШИБКА: Элементы null - mediaElement={mediaElement == null}, mediaBorder={mediaBorder == null}, textOverlayGrid={textOverlayGrid == null}");
+                    return;
+                }
+                
+                System.Diagnostics.Debug.WriteLine($"Элементы получены: mediaElement.Visibility={mediaElement.Visibility}, Opacity={mediaElement.Opacity}, Source={mediaElement.Source?.LocalPath}");
+                System.Diagnostics.Debug.WriteLine($"mediaBorder.Visibility={mediaBorder.Visibility}, Child={mediaBorder.Child?.GetType().Name}");
                 
                 // Сохраняем позицию текущего медиа перед переключением на новый слот
                 var currentMainMedia = GetCurrentMainMedia?.Invoke();
@@ -433,7 +514,18 @@ namespace ArenaApp.Services
                 switch (mediaSlot.Type)
                 {
                     case MediaType.Video:
-                        await LoadVideoFromSlot(mediaSlot, slotKey, mediaElement, mediaBorder, textOverlayGrid);
+                        System.Diagnostics.Debug.WriteLine($"LoadMediaFromSlotSelective: Загружаем ВИДЕО, slotKey={slotKey}");
+                        try
+                        {
+                            await LoadVideoFromSlot(mediaSlot, slotKey, mediaElement, mediaBorder, textOverlayGrid);
+                            System.Diagnostics.Debug.WriteLine($"LoadMediaFromSlotSelective: ВИДЕО загружено, mediaElement.Visibility={mediaElement.Visibility}, mediaElement.Opacity={mediaElement.Opacity}, Source={mediaElement.Source?.LocalPath}");
+                        }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"LoadMediaFromSlotSelective: ОШИБКА в LoadVideoFromSlot - {ex.GetType().Name}: {ex.Message}");
+                            System.Diagnostics.Debug.WriteLine($"LoadMediaFromSlotSelective: StackTrace - {ex.StackTrace}");
+                            throw;
+                        }
                         // Для видео настройки применяются внутри LoadVideoFromSlot после загрузки
                         break;
                         
@@ -465,6 +557,8 @@ namespace ArenaApp.Services
             }
             catch (Exception ex)
             {
+                System.Diagnostics.Debug.WriteLine($"LoadMediaFromSlotSelective: ИСКЛЮЧЕНИЕ - {ex.GetType().Name}: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"LoadMediaFromSlotSelective: StackTrace - {ex.StackTrace}");
                 MessageBox.Show($"Ошибка при загрузке медиа: {ex.Message}", "Ошибка");
             }
         }
@@ -472,16 +566,50 @@ namespace ArenaApp.Services
         // Приватные вспомогательные методы для загрузки разных типов медиа
         private async Task LoadVideoFromSlot(MediaSlot mediaSlot, string slotKey, MediaElement mediaElement, Border mediaBorder, Grid textOverlayGrid)
         {
+            System.Diagnostics.Debug.WriteLine($"=== LoadVideoFromSlot НАЧАЛО ===");
+            System.Diagnostics.Debug.WriteLine($"slotKey={slotKey}, Path={mediaSlot.MediaPath}");
+            
             SetCurrentVisualContent?.Invoke(slotKey);
             SetCurrentMainMedia?.Invoke(slotKey);
+            
+            // ВАЖНО: Устанавливаем видимость и прозрачность сразу
+            mediaBorder.Visibility = Visibility.Visible;
+            mediaBorder.Opacity = 1.0; // Border всегда непрозрачен
+            mediaElement.Visibility = Visibility.Visible;
+            
+            // ВАЖНО: Убеждаемся, что textOverlayGrid прозрачен и не перекрывает видео
+            if (textOverlayGrid != null)
+            {
+                textOverlayGrid.Background = new SolidColorBrush(Colors.Transparent);
+                textOverlayGrid.Opacity = 1.0; // Прозрачность текста управляется отдельно
+                // КРИТИЧНО: Убеждаемся, что textOverlayGrid не перехватывает события мыши и не перекрывает видео
+                textOverlayGrid.IsHitTestVisible = false; // Позволяет событиям проходить сквозь к mediaElement
+            }
+            
+            System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot: Установлена видимость - mediaBorder.Visibility={mediaBorder.Visibility}, mediaElement.Visibility={mediaElement.Visibility}");
             
             // Принудительно применяем общие настройки прозрачности сразу после установки _currentMainMedia
             var globalSettings = GetGlobalSettings?.Invoke();
             if (globalSettings != null && globalSettings.UseGlobalOpacity)
             {
                 var finalOpacity = globalSettings.GlobalOpacity;
+                // Убеждаемся, что прозрачность не равна 0
+                if (finalOpacity <= 0)
+                {
+                    finalOpacity = 1.0;
+                    System.Diagnostics.Debug.WriteLine($"ПРЕДУПРЕЖДЕНИЕ: Глобальная прозрачность была 0, устанавливаем 1.0");
+                }
                 System.Diagnostics.Debug.WriteLine($"LoadMediaFromSlotSelective (Video): Принудительно применяем прозрачность {finalOpacity} к mediaElement");
                 mediaElement.Opacity = finalOpacity;
+            }
+            else
+            {
+                // Если глобальная прозрачность не используется, убеждаемся, что прозрачность не равна 0
+                if (mediaElement.Opacity <= 0)
+                {
+                    mediaElement.Opacity = 1.0;
+                    System.Diagnostics.Debug.WriteLine($"ПРЕДУПРЕЖДЕНИЕ: Прозрачность mediaElement была 0, устанавливаем 1.0");
+                }
             }
             
             // Обновляем подсветку кнопок
@@ -490,28 +618,57 @@ namespace ArenaApp.Services
             // Применяем переход при смене медиа с поддержкой второго экрана
             if (_transitionService != null)
             {
-                // Скрываем элемент перед переходом, чтобы избежать мигания
-                mediaElement.Visibility = Visibility.Hidden;
+                // НЕ скрываем элемент - оставляем видимым для плавного перехода
+                // mediaElement.Visibility = Visibility.Visible; // Уже установлено выше
                 
                 await _transitionService.ApplyTransition(
                     () =>
                     {
+                        // КРИТИЧНО: Проверяем, что mediaElement не null и сохраняем в локальную переменную
+                        var element = mediaElement;
+                        if (element == null) return;
+                        
                         // Очищаем предыдущий источник внутри перехода
-                        mediaElement.Stop();
-                        mediaElement.Source = null;
+                        element.Stop();
+                        element.Source = null;
                         
                         // ВАЖНО: Устанавливаем LoadedBehavior ПЕРЕД установкой Source
-                        mediaElement.LoadedBehavior = MediaState.Manual;
+                        element.LoadedBehavior = MediaState.Manual;
                         
                         // Обновляем медиа, сохраняя текстовые блоки
-                        UpdateMediaElement(mediaElement);
-                        mediaElement.Source = new Uri(mediaSlot.MediaPath);
-                        mediaElement.Visibility = Visibility.Visible;
+                        UpdateMediaElement(element);
+                        element.Source = new Uri(mediaSlot.MediaPath);
+                        
+                        // КРИТИЧНО: Убеждаемся, что все видимо и правильно настроено
+                        element.Visibility = Visibility.Visible;
+                        element.Opacity = 1.0; // Принудительно устанавливаем непрозрачность
+                        element.HorizontalAlignment = HorizontalAlignment.Stretch;
+                        element.VerticalAlignment = VerticalAlignment.Stretch;
+                        element.Width = double.NaN; // Auto
+                        element.Height = double.NaN; // Auto
+                        element.Stretch = Stretch.Uniform;
+                        
                         if (mediaBorder != null)
                         {
                             mediaBorder.Visibility = Visibility.Visible;
+                            mediaBorder.Opacity = 1.0;
                         }
+                        
+                        // КРИТИЧНО: Убеждаемся, что textOverlayGrid не перекрывает видео
+                        if (textOverlayGrid != null)
+                        {
+                            textOverlayGrid.Background = new SolidColorBrush(Colors.Transparent);
+                            textOverlayGrid.IsHitTestVisible = false;
+                            if (textOverlayGrid.Children.Count == 0)
+                            {
+                                textOverlayGrid.Visibility = Visibility.Collapsed;
+                            }
+                        }
+                        
                         RegisterActiveMediaFile?.Invoke(mediaSlot.MediaPath);
+                        
+                        System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (Transition): mediaElement.Visibility={element.Visibility}, Opacity={element.Opacity}, Source={element.Source?.LocalPath}");
+                        System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (Transition): mediaElement.Width={element.Width}, Height={element.Height}, Stretch={element.Stretch}");
                     },
                     () => SyncVideoToSecondaryScreen(mediaSlot, slotKey)
                 );
@@ -527,11 +684,36 @@ namespace ArenaApp.Services
                 
                 UpdateMediaElement(mediaElement);
                 mediaElement.Source = new Uri(mediaSlot.MediaPath);
+                
+                // КРИТИЧНО: Убеждаемся, что все видимо и правильно настроено
                 mediaElement.Visibility = Visibility.Visible;
+                mediaElement.Opacity = 1.0; // Принудительно устанавливаем непрозрачность
+                mediaElement.HorizontalAlignment = HorizontalAlignment.Stretch;
+                mediaElement.VerticalAlignment = VerticalAlignment.Stretch;
+                mediaElement.Width = double.NaN; // Auto
+                mediaElement.Height = double.NaN; // Auto
+                mediaElement.Stretch = Stretch.Uniform;
+                
                 if (mediaBorder != null)
                 {
                     mediaBorder.Visibility = Visibility.Visible;
+                    mediaBorder.Opacity = 1.0;
                 }
+                
+                // КРИТИЧНО: Убеждаемся, что textOverlayGrid не перекрывает видео
+                if (textOverlayGrid != null)
+                {
+                    textOverlayGrid.Background = new SolidColorBrush(Colors.Transparent);
+                    textOverlayGrid.IsHitTestVisible = false;
+                    if (textOverlayGrid.Children.Count == 0)
+                    {
+                        textOverlayGrid.Visibility = Visibility.Collapsed;
+                    }
+                }
+                
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (No Transition): mediaElement.Visibility={mediaElement.Visibility}, Opacity={mediaElement.Opacity}, Source={mediaElement.Source?.LocalPath}");
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (No Transition): mediaElement.Width={mediaElement.Width}, Height={mediaElement.Height}, Stretch={mediaElement.Stretch}");
+                
                 RegisterActiveMediaFile?.Invoke(mediaSlot.MediaPath);
                 SyncVideoToSecondaryScreen(mediaSlot, slotKey);
             }
@@ -544,6 +726,111 @@ namespace ArenaApp.Services
             {
                 // Отписываемся от события, чтобы избежать повторных вызовов
                 mediaElement.MediaOpened -= mediaOpenedHandler;
+                
+                // ВАЖНО: Убеждаемся, что все элементы видимы и непрозрачны
+                mediaElement.Visibility = Visibility.Visible;
+                if (mediaBorder != null)
+                {
+                    mediaBorder.Visibility = Visibility.Visible;
+                    mediaBorder.Opacity = 1.0;
+                }
+                
+                // ВАЖНО: Убеждаемся, что textOverlayGrid прозрачен и не перекрывает видео
+                if (textOverlayGrid != null)
+                {
+                    textOverlayGrid.Background = new SolidColorBrush(Colors.Transparent);
+                    textOverlayGrid.Opacity = 1.0; // Прозрачность текста управляется отдельно
+                    // КРИТИЧНО: Убеждаемся, что textOverlayGrid не перехватывает события мыши и не перекрывает видео
+                    textOverlayGrid.IsHitTestVisible = false; // Позволяет событиям проходить сквозь к mediaElement
+                }
+                
+                // КРИТИЧНО: Проверяем размеры и позицию элементов
+                var mainGrid = mediaBorder?.Child as Grid;
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): mediaElement.Visibility={mediaElement.Visibility}, Opacity={mediaElement.Opacity}");
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): mediaBorder.Visibility={mediaBorder?.Visibility}, textOverlayGrid.Background={textOverlayGrid?.Background}");
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): mediaElement.Width={mediaElement.Width}, Height={mediaElement.Height}");
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): mediaElement.ActualWidth={mediaElement.ActualWidth}, ActualHeight={mediaElement.ActualHeight}");
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): mediaBorder.ActualWidth={mediaBorder?.ActualWidth}, ActualHeight={mediaBorder?.ActualHeight}");
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): mediaElement в Grid={mainGrid?.Children.Contains(mediaElement) ?? false}");
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): Индекс mediaElement в Grid={mainGrid?.Children.IndexOf(mediaElement) ?? -1}");
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): Индекс textOverlayGrid в Grid={mainGrid?.Children.IndexOf(textOverlayGrid) ?? -1}");
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): Всего детей в Grid={mainGrid?.Children.Count ?? 0}");
+                if (mainGrid != null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): Дети Grid: {string.Join(", ", mainGrid.Children.Cast<UIElement>().Select(c => $"{c.GetType().Name}(Z={mainGrid.Children.IndexOf(c)})"))}");
+                }
+                
+                // КРИТИЧНО: Убеждаемся, что mediaElement правильно настроен для отображения
+                mediaElement.Visibility = Visibility.Visible;
+                if (mediaElement.Opacity <= 0)
+                {
+                    mediaElement.Opacity = 1.0;
+                    System.Diagnostics.Debug.WriteLine($"ПРЕДУПРЕЖДЕНИЕ: Прозрачность mediaElement была 0 в MediaOpened, устанавливаем 1.0");
+                }
+                
+                // КРИТИЧНО: Убеждаемся, что mediaElement растягивается на весь доступный размер
+                mediaElement.HorizontalAlignment = HorizontalAlignment.Stretch;
+                mediaElement.VerticalAlignment = VerticalAlignment.Stretch;
+                mediaElement.Width = double.NaN; // Auto
+                mediaElement.Height = double.NaN; // Auto
+                mediaElement.Stretch = Stretch.Uniform;
+                
+                // КРИТИЧНО: Проверяем размеры
+                if (mediaElement.ActualWidth <= 0 || mediaElement.ActualHeight <= 0)
+                {
+                    System.Diagnostics.Debug.WriteLine($"ПРОБЛЕМА: mediaElement имеет нулевой размер! ActualWidth={mediaElement.ActualWidth}, ActualHeight={mediaElement.ActualHeight}");
+                    System.Diagnostics.Debug.WriteLine($"ПРОБЛЕМА: mediaBorder.ActualWidth={mediaBorder?.ActualWidth}, ActualHeight={mediaBorder?.ActualHeight}");
+                    System.Diagnostics.Debug.WriteLine($"ПРОБЛЕМА: mainGrid.ActualWidth={mainGrid?.ActualWidth}, ActualHeight={mainGrid?.ActualHeight}");
+                    
+                    // Принудительно обновляем layout
+                    if (mainGrid != null)
+                    {
+                        mainGrid.InvalidateMeasure();
+                        mainGrid.InvalidateArrange();
+                        System.Diagnostics.Debug.WriteLine($"ИСПРАВЛЕНИЕ: Вызваны InvalidateMeasure и InvalidateArrange для mainGrid");
+                    }
+                    
+                    // Планируем повторную проверку через небольшую задержку
+                    var dispatcher = GetDispatcher?.Invoke();
+                    if (dispatcher != null)
+                    {
+                        dispatcher.BeginInvoke(new Action(() =>
+                        {
+                            if (mediaElement.ActualWidth <= 0 || mediaElement.ActualHeight <= 0)
+                            {
+                                System.Diagnostics.Debug.WriteLine($"ПРОБЛЕМА ПОВТОР: mediaElement все еще имеет нулевой размер после обновления layout!");
+                                System.Diagnostics.Debug.WriteLine($"ПРОБЛЕМА ПОВТОР: mediaElement.ActualWidth={mediaElement.ActualWidth}, ActualHeight={mediaElement.ActualHeight}");
+                                System.Diagnostics.Debug.WriteLine($"ПРОБЛЕМА ПОВТОР: mediaBorder.ActualWidth={mediaBorder?.ActualWidth}, ActualHeight={mediaBorder?.ActualHeight}");
+                            }
+                        }), System.Windows.Threading.DispatcherPriority.Loaded);
+                    }
+                }
+                
+                // КРИТИЧНО: Убеждаемся, что textOverlayGrid не перекрывает видео визуально
+                if (textOverlayGrid != null && mainGrid != null)
+                {
+                    // Проверяем порядок элементов - textOverlayGrid должен быть последним
+                    var mediaIndex = mainGrid.Children.IndexOf(mediaElement);
+                    var textIndex = mainGrid.Children.IndexOf(textOverlayGrid);
+                    
+                    if (textIndex >= 0 && mediaIndex >= 0 && textIndex <= mediaIndex)
+                    {
+                        // textOverlayGrid должен быть после mediaElement
+                        mainGrid.Children.Remove(textOverlayGrid);
+                        mainGrid.Children.Add(textOverlayGrid);
+                        System.Diagnostics.Debug.WriteLine($"ИСПРАВЛЕНИЕ: Перемещен textOverlayGrid в конец Grid для правильного Z-индекса");
+                    }
+                    
+                    // Убеждаемся, что textOverlayGrid полностью прозрачен
+                    textOverlayGrid.Background = new SolidColorBrush(Colors.Transparent);
+                    textOverlayGrid.IsHitTestVisible = false;
+                    
+                    // Если в textOverlayGrid нет детей, скрываем его
+                    if (textOverlayGrid.Children.Count == 0)
+                    {
+                        textOverlayGrid.Visibility = Visibility.Collapsed; // Collapsed вместо Hidden для полного скрытия
+                    }
+                }
                 
                 if (slotPosition > TimeSpan.Zero)
                 {
@@ -773,27 +1060,31 @@ namespace ArenaApp.Services
             var slotPosition = GetSlotPosition?.Invoke(slotKey) ?? TimeSpan.Zero;
             secondaryMediaElement.MediaOpened += (s, e) =>
             {
+                // КРИТИЧНО: Проверяем, что secondaryMediaElement не null и сохраняем в локальную переменную
+                var element = secondaryMediaElement;
+                if (element == null) return;
+                
                 if (slotPosition > TimeSpan.Zero)
                 {
-                    var duration = secondaryMediaElement.NaturalDuration;
+                    var duration = element.NaturalDuration;
                     if (duration.HasTimeSpan)
                     {
                         var remainingTime = duration.TimeSpan - slotPosition;
                         if (remainingTime.TotalSeconds < 0.4)
                         {
-                            secondaryMediaElement.Position = TimeSpan.Zero;
+                            element.Position = TimeSpan.Zero;
                         }
                         else
                         {
-                            secondaryMediaElement.Position = slotPosition;
+                            element.Position = slotPosition;
                         }
                     }
                     else
                     {
-                        secondaryMediaElement.Position = slotPosition;
+                        element.Position = slotPosition;
                     }
                 }
-                secondaryMediaElement.Play();
+                element.Play();
             };
             
             System.Diagnostics.Debug.WriteLine($"СИНХРОНИЗАЦИЯ МЕДИА: Передан файл {mediaSlot.MediaPath} на дополнительный экран");
@@ -934,7 +1225,7 @@ namespace ArenaApp.Services
                 
                 // Добавляем автопереход для аудио
                 var dispatcher = GetDispatcher?.Invoke();
-                if (dispatcher != null && AutoPlayNextAudioElement != null)
+                if (dispatcher != null && AutoPlayNextAudioElement != null && audioElement != null)
                 {
                     audioElement.MediaEnded += (s, e) =>
                     {
@@ -959,10 +1250,21 @@ namespace ArenaApp.Services
                 SetCurrentAudioContent?.Invoke(slotKey);
                 RegisterActiveMediaFile?.Invoke(mediaSlot.MediaPath);
                 
-                audioElement.Play();
+                if (audioElement != null)
+                {
+                    audioElement.Play();
+                }
+            }
+            else if (audioElement != null)
+            {
+                // Если используем существующий аудио элемент, просто обновляем состояние
+                SetCurrentAudioContent?.Invoke(slotKey);
             }
             
-            SetIsAudioPlaying?.Invoke(true);
+            if (audioElement != null)
+            {
+                SetIsAudioPlaying?.Invoke(true);
+            }
             UpdateAllSlotButtonsHighlighting?.Invoke();
         }
         

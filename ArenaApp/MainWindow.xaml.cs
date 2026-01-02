@@ -27,6 +27,8 @@ namespace ArenaApp;
 /// </summary>
 public partial class MainWindow : Window
 {
+    // Guard: чтобы при LoadGlobalSettings установка IsChecked не вызывала сохранение/диалоги
+    private bool _isStorageModeUiInitializing = false;
     public ProjectManager _projectManager = null!;
     private PreviewGenerator _previewGenerator = null!;
     
@@ -61,6 +63,7 @@ public partial class MainWindow : Window
     private readonly Services.MenuService _menuService = new();
     private readonly Services.ElementSettingsEventHandlerService _elementSettingsEventHandlerService = new();
     private readonly Services.GlobalSettingsEventHandlerService _globalSettingsEventHandlerService = new();
+    private readonly Services.SlotMediaService _slotMediaService = new();
     
     // Свойства для обратной совместимости с MediaStateService
     private string? _currentMainMedia
@@ -233,6 +236,39 @@ public partial class MainWindow : Window
             // Подписываемся на событие открытия меню Edit для обновления устройств
             EditMenuItem.SubmenuOpened += EditMenuItem_SubmenuOpened;
             
+            // Подписываемся на событие загрузки медиа для запуска воспроизведения
+            mediaElement.MediaOpened += (s, e) =>
+            {
+                // КРИТИЧНО: Запускаем воспроизведение после загрузки медиа
+                // Это решает проблему с нулевым размером MediaElement
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    try
+                    {
+                        if (mediaElement != null && mediaElement.Source != null && mediaElement.LoadedBehavior == MediaState.Manual)
+                        {
+                            // НЕ трогаем размеры MediaElement - XAML управляет layout!
+                            System.Diagnostics.Debug.WriteLine($"MainWindow.MediaOpened: ActualWidth={mediaElement.ActualWidth}, ActualHeight={mediaElement.ActualHeight}");
+                            
+                            // Запускаем воспроизведение
+                            System.Diagnostics.Debug.WriteLine($"MainWindow.MediaOpened: Запускаем воспроизведение, Source={mediaElement.Source?.LocalPath}");
+                            mediaElement.Play();
+                            isVideoPlaying = true;
+                            
+                            // Синхронизируем с дополнительным экраном
+                            if (_secondaryMediaElement != null && _secondaryMediaElement.Source != null)
+                            {
+                                _secondaryMediaElement.Play();
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"MainWindow.MediaOpened: ОШИБКА - {ex.Message}");
+                    }
+                }), System.Windows.Threading.DispatcherPriority.Loaded);
+            };
+            
             // Подписываемся на событие окончания воспроизведения для автоперехода
             mediaElement.MediaEnded += (s, e) => 
             {
@@ -392,6 +428,7 @@ public partial class MainWindow : Window
         _mediaPlayerService.GetMainMediaElement = () => mediaElement;
         _mediaPlayerService.GetMediaBorder = () => mediaBorder;
         _mediaPlayerService.GetTextOverlayGrid = () => textOverlayGrid;
+        _mediaPlayerService.GetAbsoluteMediaPath = (path) => _projectManager.GetAbsoluteMediaPath(path);
         _mediaPlayerService.GetSecondaryMediaElement = () => 
         {
             // Сначала проверяем сервис, потом локальную переменную
@@ -549,8 +586,8 @@ public partial class MainWindow : Window
         {
             CloseSecondaryScreenWindow();
         };
-        _dialogService.LoadMediaToSlot = (col, row) => LoadMediaToSlot(col, row);
-        _dialogService.CreateTextBlock = (col, row) => CreateTextBlock(col, row);
+        _dialogService.LoadMediaToSlot = (col, row) => _slotMediaService.LoadMediaToSlot(col, row);
+        _dialogService.CreateTextBlock = (col, row) => _slotMediaService.CreateTextBlock(col, row);
         
         // Настройка ContextMenuService
         _contextMenuService.GetContextMenuStyle = (obj) => (Style)FindResource("ContextMenuStyle");
@@ -806,6 +843,9 @@ public partial class MainWindow : Window
         _elementControlService.SetCurrentMainMedia = (value) => _currentMainMedia = value;
         _elementControlService.GetCurrentAudioContent = () => _currentAudioContent;
         _elementControlService.GetCurrentVisualContent = () => _currentVisualContent;
+        _elementControlService.SetCurrentVisualContent = (value) => _currentVisualContent = value;
+        _elementControlService.GetCurrentAudioContent = () => _currentAudioContent;
+        _elementControlService.SetCurrentAudioContent = (value) => _currentAudioContent = value;
         _elementControlService.GetIsVideoPaused = () => _isVideoPaused;
         _elementControlService.SetIsVideoPaused = (value) => _isVideoPaused = value;
         _elementControlService.SetIsVideoPlaying = (value) => isVideoPlaying = value;
@@ -912,19 +952,6 @@ public partial class MainWindow : Window
         _elementSettingsUIService.TextYTextBox_TextChanged = TextYTextBox_TextChanged;
         _elementSettingsUIService.ApplyElementSettings = () => ApplyElementSettings();
         
-        // Обновляем делегаты событий в ElementSettingsUIService для использования ElementSettingsEventHandlerService
-        _elementSettingsUIService.SpeedSlider_ValueChanged = SpeedSlider_ValueChanged;
-        _elementSettingsUIService.OpacitySlider_ValueChanged = OpacitySlider_ValueChanged;
-        _elementSettingsUIService.VolumeSlider_ValueChanged = VolumeSlider_ValueChanged;
-        _elementSettingsUIService.ScaleSlider_ValueChanged = ScaleSlider_ValueChanged;
-        _elementSettingsUIService.RotationSlider_ValueChanged = RotationSlider_ValueChanged;
-        _elementSettingsUIService.TextColorComboBox_SelectionChanged = TextColorComboBox_SelectionChanged;
-        _elementSettingsUIService.FontFamilyComboBox_SelectionChanged = FontFamilyComboBox_SelectionChanged;
-        _elementSettingsUIService.FontSizeSlider_ValueChanged = FontSizeSlider_ValueChanged;
-        _elementSettingsUIService.TextContentTextBox_TextChanged = TextContentTextBox_TextChanged;
-        _elementSettingsUIService.UseManualPositionCheckBox_Checked = UseManualPositionCheckBox_Checked;
-        _elementSettingsUIService.UseManualPositionCheckBox_Unchecked = UseManualPositionCheckBox_Unchecked;
-        
         // Настройка GlobalSettingsUIService
         _globalSettingsUIService.SetProjectManager(_projectManager);
         _globalSettingsUIService.SetSettingsManager(_settingsManager);
@@ -1016,6 +1043,14 @@ public partial class MainWindow : Window
         _globalSettingsEventHandlerService.ApplyGlobalSettings = () => ApplyGlobalSettings();
         _globalSettingsEventHandlerService.ApplyElementSettings = () => ApplyElementSettings();
         _globalSettingsEventHandlerService.SaveProject = () => _projectManager.SaveProject();
+        
+        // Настройка SlotMediaService
+        _slotMediaService.SetProjectManager(_projectManager);
+        _slotMediaService.UpdateSlotButton = (col, row, path, type) => UpdateSlotButton(col, row, path, type);
+        _slotMediaService.UpdateAllSlotButtonsHighlighting = () => UpdateAllSlotButtonsHighlighting();
+        _slotMediaService.GetMediaType = (path) => GetMediaType(path);
+        _slotMediaService.CreateTextInputDialog = () => new TextInputDialog();
+        _slotMediaService.ShowMessageBox = (message, title) => MessageBox.Show(message, title);
         
         // Настройка ElementSettingsEventHandlerService
         _elementSettingsEventHandlerService.GetSelectedElementSlot = () => _selectedElementSlot;
@@ -1453,6 +1488,67 @@ public partial class MainWindow : Window
             System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: НАЧАЛО, Type={mediaSlot.Type}, Path={mediaSlot.MediaPath}");
             await _mediaPlayerService.LoadMediaFromSlotSelective(mediaSlot);
             System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: ЗАВЕРШЕНО");
+            
+            // КРИТИЧНО: Запускаем видео ПОСЛЕ загрузки, если это видео
+            // Это решает проблему с нулевым размером MediaElement
+            if (mediaSlot.Type == MediaType.Video)
+            {
+                System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: Запускаем видео после загрузки");
+                
+                // Используем BeginInvoke с высоким приоритетом для принудительного обновления layout
+                _ = Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    try
+                    {
+                        // Проверяем, что mediaElement существует и имеет Source
+                        if (mediaElement != null && mediaElement.Source != null)
+                        {
+                            // Убеждаемся, что LoadedBehavior установлен правильно
+                            if (mediaElement.LoadedBehavior != MediaState.Manual)
+                            {
+                                mediaElement.LoadedBehavior = MediaState.Manual;
+                                System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: Исправлен LoadedBehavior на Manual");
+                            }
+                            
+                            // КРИТИЧНО: НЕ трогаем размеры MediaElement!
+                            // XAML правильно настроил все свойства layout, любые изменения нарушают WPF layout system
+                            System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: Проверяем размеры MediaElement - ActualWidth={mediaElement.ActualWidth}, ActualHeight={mediaElement.ActualHeight}");
+                            System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: mediaBorder - ActualWidth={mediaBorder?.ActualWidth}, ActualHeight={mediaBorder?.ActualHeight}");
+                            
+                            // Убеждаемся, что элемент видим и непрозрачен
+                            mediaElement.Visibility = Visibility.Visible;
+                            if (mediaElement.Opacity <= 0)
+                            {
+                                mediaElement.Opacity = 1.0;
+                                System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: Исправлена прозрачность на 1.0");
+                            }
+                            
+                            // Запускаем воспроизведение
+                            System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: Вызываем Play(), Source={mediaElement.Source?.LocalPath}, ActualWidth={mediaElement.ActualWidth}, ActualHeight={mediaElement.ActualHeight}");
+                            mediaElement.Play();
+                            isVideoPlaying = true;
+                            
+                            // Синхронизируем с дополнительным экраном
+                            if (_secondaryMediaElement != null && _secondaryMediaElement.Source != null)
+                            {
+                                _secondaryMediaElement.Play();
+                                System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: Запущено воспроизведение на дополнительном экране");
+                            }
+                            
+                            System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: Play() вызван успешно");
+                        }
+                        else
+                        {
+                            System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: ОШИБКА - mediaElement == null или Source == null");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: ОШИБКА при запуске видео - {ex.Message}");
+                        System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: StackTrace - {ex.StackTrace}");
+                    }
+                }), System.Windows.Threading.DispatcherPriority.Loaded);
+            }
         }
         catch (Exception ex)
         {
@@ -1468,86 +1564,12 @@ public partial class MainWindow : Window
 
     private void LoadMediaToSlot(int column, int row)
     {
-        var openFileDialog = new OpenFileDialog();
-        openFileDialog.Filter = "Media files|*.mp4;*.avi;*.mov;*.wmv;*.flv;*.mkv;*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.mp3;*.wav;*.flac;*.aac";
-        
-        if (openFileDialog.ShowDialog() == true)
-        {
-            string filePath = openFileDialog.FileName;
-            MediaType mediaType = GetMediaType(filePath);
-            
-            // Добавляем медиа в проект
-            _projectManager.AddMediaToSlot(column, row, filePath, mediaType);
-            
-            // Обновляем кнопку с превью
-            UpdateSlotButton(column, row, filePath, mediaType);
-            
-            MessageBox.Show($"Медиа добавлено в слот {column}-{row}", "Успех");
-        }
+        _slotMediaService.LoadMediaToSlot(column, row);
     }
 
     private void CreateTextBlock(int column, int row)
     {
-        try
-        {
-            // Проверяем, что ProjectManager инициализирован
-            if (_projectManager?.CurrentProject == null)
-            {
-                MessageBox.Show("Проект не инициализирован. Создайте новый проект.", "Ошибка");
-                return;
-            }
-
-            // Создаем простое диалоговое окно для ввода текста
-            var textInputDialog = new TextInputDialog();
-            textInputDialog.Title = "Создание текстового блока";
-            textInputDialog.LabelText = "Введите текст:";
-            textInputDialog.TextValue = "";
-            
-            if (textInputDialog.ShowDialog() == true)
-            {
-                string textContent = textInputDialog.TextValue;
-                if (!string.IsNullOrWhiteSpace(textContent))
-                {
-                    // Создаем текстовый слот
-                    var textSlot = new MediaSlot
-                    {
-                        Column = column,
-                        Row = row,
-                        MediaPath = "", // Для текстовых блоков путь пустой
-                        Type = MediaType.Text,
-                        PreviewPath = "",
-                        DisplayName = textContent.Length > 10 ? textContent.Substring(0, 10) + "..." : textContent,
-                        TextContent = textContent,
-                        FontFamily = "Arial",
-                        FontSize = 24,
-                        FontColor = "White",
-                        BackgroundColor = "Transparent",
-                        TextPosition = "Center",
-                        TextX = 0,
-                        TextY = 0,
-                        UseManualPosition = false,
-                        IsTextVisible = true
-                    };
-                    
-                    // Добавляем в проект
-                    _projectManager.CurrentProject.MediaSlots.RemoveAll(slot => slot.Column == column && slot.Row == row);
-                    _projectManager.CurrentProject.MediaSlots.Add(textSlot);
-                    
-                    // Обновляем кнопку
-                    UpdateSlotButton(column, row, "", MediaType.Text);
-                    
-                    // Обновляем подсветку всех кнопок
-                    UpdateAllSlotButtonsHighlighting();
-                    
-                    MessageBox.Show($"Текстовый блок создан в слоте {column}-{row}", "Успех");
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show($"Ошибка при создании текстового блока: {ex.Message}", "Ошибка");
-            System.Diagnostics.Debug.WriteLine($"CreateTextBlock Error: {ex}");
-        }
+        _slotMediaService.CreateTextBlock(column, row);
     }
 
     private MediaType GetMediaType(string filePath)
@@ -2415,6 +2437,27 @@ public partial class MainWindow
     private void LoadGlobalSettings()
     {
         _globalSettingsUIService.LoadGlobalSettings();
+        
+        // Загружаем режим хранения медиафайлов
+        _isStorageModeUiInitializing = true;
+        try
+        {
+            var storageMode = _projectManager.CurrentProject.GlobalSettings.StorageMode;
+            if (storageMode == StorageMode.Paths)
+            {
+                StorageModePathsRadio.IsChecked = true;
+                StorageModeInfoText.Text = "Текущий режим: Пути к файлам (экономно)";
+            }
+            else
+            {
+                StorageModeEmbeddedRadio.IsChecked = true;
+                StorageModeInfoText.Text = "Текущий режим: Копировать в папку проекта (автономно)";
+            }
+        }
+        finally
+        {
+            _isStorageModeUiInitializing = false;
+        }
     }
     
     // Применить переход между медиа элементами
@@ -2763,5 +2806,86 @@ public partial class MainWindow
     private void LoadPanelPositions()
     {
         _panelPositionService.LoadPanelPositions();
+    }
+    
+    /// <summary>
+    /// Обработчик выбора режима хранения медиафайлов
+    /// </summary>
+    private void StorageModeRadio_Checked(object sender, RoutedEventArgs e)
+    {
+        // Не реагируем на события, которые были вызваны программной установкой IsChecked при старте
+        if (_isStorageModeUiInitializing)
+        {
+            return;
+        }
+
+        if (sender is RadioButton radioButton && radioButton.Tag is string modeString)
+        {
+            if (Enum.TryParse<StorageMode>(modeString, out var storageMode))
+            {
+                // Если пользователь выбрал Embedded, но проект еще не сохранен — не открываем диалог при старте.
+                // Просим пользователя сначала сохранить проект вручную (File -> Save Project As).
+                if (storageMode == StorageMode.Embedded && !_projectManager.HasProjectFilePath)
+                {
+                    _isStorageModeUiInitializing = true;
+                    try
+                    {
+                        StorageModePathsRadio.IsChecked = true;
+                        StorageModeEmbeddedRadio.IsChecked = false;
+                        _projectManager.CurrentProject.GlobalSettings.StorageMode = StorageMode.Paths;
+                        StorageModeInfoText.Text = "Текущий режим: Пути к файлам (сначала сохраните проект, чтобы включить копирование)";
+                    }
+                    finally
+                    {
+                        _isStorageModeUiInitializing = false;
+                    }
+
+                    MessageBox.Show(
+                        "Чтобы включить режим \"Копировать в папку проекта\", сначала сохраните проект (Файл → Сохранить проект как).\n" +
+                        "После сохранения можно снова выбрать этот режим.",
+                        "Проект не сохранен",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                    return;
+                }
+
+                _projectManager.CurrentProject.GlobalSettings.StorageMode = storageMode;
+                
+                // Обновляем текст информации
+                string modeText = storageMode == StorageMode.Paths 
+                    ? "Пути к файлам (экономно)" 
+                    : "Копировать в папку проекта (автономно)";
+                StorageModeInfoText.Text = $"Текущий режим: {modeText}";
+                
+                System.Diagnostics.Debug.WriteLine($"StorageMode изменен на: {storageMode}");
+                // ВАЖНО: не сохраняем автоматически, чтобы не всплывал диалог Save/Open при старте.
+                // Проект будет сохранён пользователем через меню.
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Обработчик ошибок MediaElement
+    /// </summary>
+    private void MediaElement_MediaFailed(object sender, ExceptionRoutedEventArgs e)
+    {
+        var errorMessage = e.ErrorException?.Message ?? "Неизвестная ошибка";
+        var errorCode = e.ErrorException?.HResult.ToString("X") ?? "N/A";
+        
+        System.Diagnostics.Debug.WriteLine($"ОШИБКА MediaElement: {errorMessage}");
+        System.Diagnostics.Debug.WriteLine($"ОШИБКА MediaElement Code: {errorCode}");
+        System.Diagnostics.Debug.WriteLine($"ОШИБКА MediaElement StackTrace: {e.ErrorException?.StackTrace}");
+        
+        // Расшифровка кода ошибки
+        string errorDescription = errorCode switch
+        {
+            "0xC00D109B" => "Формат файла не поддерживается Windows Media Foundation.\n\nВозможные решения:\n1. Установите K-Lite Codec Pack\n2. Конвертируйте видео в MP4 (H.264)\n3. Используйте другой формат файла",
+            "0x80070002" => "Файл не найден",
+            "0x80070005" => "Нет доступа к файлу",
+            _ => $"Код ошибки: {errorCode}"
+        };
+        
+        MessageBox.Show($"Ошибка при загрузке медиа:\n{errorMessage}\n\n{errorDescription}", 
+            "Ошибка MediaElement", MessageBoxButton.OK, MessageBoxImage.Error);
     }
 }

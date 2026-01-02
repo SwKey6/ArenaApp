@@ -83,7 +83,7 @@ namespace ArenaApp {
                 return;
             }
             _contentLoaded = true;
-            System.Uri resourceLocater = new System.Uri("/ArenaApp;V1.0.0.0;component/textinputdialog.xaml", System.UriKind.Relative);
+            System.Uri resourceLocater = new System.Uri("/ArenaApp;component/textinputdialog.xaml", System.UriKind.Relative);
             
             #line 1 "..\..\..\TextInputDialog.xaml"
             System.Windows.Application.LoadComponent(this, resourceLocater);

@@ -85,6 +85,9 @@ namespace ArenaApp.Models
         public PanelLayout GlobalSettingsPanel { get; set; } = new PanelLayout { Left = 420, Top = 0, Width = 400, Height = 500 };
         public PanelLayout MediaPlayerPanel { get; set; } = new PanelLayout { Left = 0, Top = 0, Width = 500, Height = 500 };
         public PanelLayout MediaCellsPanel { get; set; } = new PanelLayout { Left = 0, Top = 0, Width = 800, Height = 300 };
+        
+        // Режим хранения медиафайлов
+        public StorageMode StorageMode { get; set; } = StorageMode.Paths;  // По умолчанию - пути
     }
     
     public class PanelLayout
@@ -101,5 +104,14 @@ namespace ArenaApp.Models
         Fade,           // Плавное затухание
         Slide,          // Скольжение
         Zoom            // Увеличение/уменьшение
+    }
+    
+    /// <summary>
+    /// Режим хранения медиафайлов
+    /// </summary>
+    public enum StorageMode
+    {
+        Paths,          // Хранение только путей к файлам (текущий режим)
+        Embedded        // Копирование всех медиафайлов в папку проекта
     }
 }

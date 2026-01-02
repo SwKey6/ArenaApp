@@ -12,8 +12,6 @@ namespace ArenaApp.Services
     /// </summary>
     public class ElementSettingsEventHandlerService
     {
-        private MediaSlot? _selectedElementSlot;
-        
         // Делегаты для доступа к UI элементам
         public Func<Slider>? GetSpeedSlider { get; set; }
         public Func<TextBlock>? GetSpeedValueText { get; set; }

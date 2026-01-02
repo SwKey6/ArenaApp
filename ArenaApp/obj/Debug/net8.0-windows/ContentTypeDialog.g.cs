@@ -75,7 +75,7 @@ namespace ArenaApp {
                 return;
             }
             _contentLoaded = true;
-            System.Uri resourceLocater = new System.Uri("/ArenaApp;V1.0.0.0;component/contenttypedialog.xaml", System.UriKind.Relative);
+            System.Uri resourceLocater = new System.Uri("/ArenaApp;component/contenttypedialog.xaml", System.UriKind.Relative);
             
             #line 1 "..\..\..\ContentTypeDialog.xaml"
             System.Windows.Application.LoadComponent(this, resourceLocater);

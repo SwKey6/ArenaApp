@@ -45,12 +45,8 @@ namespace ArenaApp.Services
             
             if (mediaBorder == null || textOverlayGrid == null) return;
             
-            // Устанавливаем правильный Stretch для медиа, чтобы оно помещалось в зону, а не растягивалось
-            mediaElement.Stretch = Stretch.Uniform;
-            mediaElement.HorizontalAlignment = HorizontalAlignment.Center;
-            mediaElement.VerticalAlignment = VerticalAlignment.Center;
-            
-            // ВАЖНО: Устанавливаем видимость и прозрачность сразу
+            // НЕ трогаем Stretch, HorizontalAlignment, VerticalAlignment - они установлены в XAML!
+            // Устанавливаем только видимость и прозрачность
             mediaElement.Visibility = Visibility.Visible;
             if (mediaElement.Opacity <= 0)
             {

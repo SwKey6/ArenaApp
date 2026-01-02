@@ -32,7 +32,9 @@ namespace ArenaApp.Services
         public Func<string?>? GetCurrentMainMedia { get; set; }
         public Action<string?>? SetCurrentMainMedia { get; set; }
         public Func<string?>? GetCurrentAudioContent { get; set; }
+        public Action<string?>? SetCurrentAudioContent { get; set; }
         public Func<string?>? GetCurrentVisualContent { get; set; }
+        public Action<string?>? SetCurrentVisualContent { get; set; }
         public Func<bool>? GetIsVideoPaused { get; set; }
         public Action<bool>? SetIsVideoPaused { get; set; }
         public Action<bool>? SetIsVideoPlaying { get; set; }

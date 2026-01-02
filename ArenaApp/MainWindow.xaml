@@ -604,6 +604,40 @@
                                          HorizontalAlignment="Center"
                                          Margin="0,0,0,20"/>
                                 
+                                <!-- Режим хранения медиафайлов -->
+                                <GroupBox Header="Режим хранения медиафайлов" 
+                                        Foreground="#ECEFF4" 
+                                        BorderBrush="#4C566A"
+                                        Margin="0,0,0,15">
+                                    <StackPanel>
+                                        <TextBlock Text="Выберите способ хранения медиафайлов в проекте:"
+                                                 Foreground="#D8DEE9"
+                                                 TextWrapping="Wrap"
+                                                 Margin="0,0,0,10"/>
+                                        
+                                        <RadioButton x:Name="StorageModePathsRadio"
+                                                   Content="Пути к файлам (экономно, но файлы должны оставаться на месте)"
+                                                   Foreground="#D8DEE9"
+                                                   Margin="0,5,0,5"
+                                                   Tag="Paths"
+                                                   Checked="StorageModeRadio_Checked"/>
+                                        
+                                        <RadioButton x:Name="StorageModeEmbeddedRadio"
+                                                   Content="Копировать в папку проекта (занимает место, но проект полностью автономен)"
+                                                   Foreground="#D8DEE9"
+                                                   Margin="0,5,0,5"
+                                                   Tag="Embedded"
+                                                   Checked="StorageModeRadio_Checked"/>
+                                        
+                                        <TextBlock x:Name="StorageModeInfoText"
+                                                 Text="Текущий режим: Пути к файлам"
+                                                 Foreground="#88C0D0"
+                                                 FontSize="11"
+                                                 TextWrapping="Wrap"
+                                                 Margin="0,10,0,0"/>
+                                    </StackPanel>
+                                </GroupBox>
+                                
                                 <!-- Общая громкость -->
                                 <GroupBox Header="Общая громкость" 
                                         Foreground="#ECEFF4" 
@@ -924,22 +958,38 @@
                             <Border Name="mediaBorder" 
                                     Height="350" 
                                     VerticalAlignment="Top" 
+                                    HorizontalAlignment="Stretch"
                                     Margin="10,10,10,10" 
                                     Background="#2E3440"
                                     CornerRadius="12"
                                     BorderBrush="#4C566A"
                                     BorderThickness="2"
                                     ClipToBounds="True">
-                                <Grid ClipToBounds="True">
+                                <Grid ClipToBounds="False"
+                                      HorizontalAlignment="Stretch"
+                                      VerticalAlignment="Stretch">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    
                                     <!-- Основное медиа (видео/изображение) -->
                                     <MediaElement Name="mediaElement" 
+                                                Grid.Row="0" Grid.Column="0"
                                                 LoadedBehavior="Manual" 
                                                 Stretch="Uniform"
-                                                HorizontalAlignment="Center"
-                                                VerticalAlignment="Center"/>
+                                                ScrubbingEnabled="True"
+                                                UnloadedBehavior="Close"
+                                                MediaFailed="MediaElement_MediaFailed"/>
                                     
                                     <!-- Текстовые блоки поверх медиа -->
-                                    <Grid Name="textOverlayGrid" Background="Transparent"/>
+                                    <Grid Name="textOverlayGrid" 
+                                          Grid.Row="0" Grid.Column="0"
+                                          Background="Transparent"
+                                          HorizontalAlignment="Stretch"
+                                          VerticalAlignment="Stretch"/>
                                 </Grid>
                             </Border>
                             

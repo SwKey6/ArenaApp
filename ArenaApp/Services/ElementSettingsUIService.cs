@@ -55,19 +55,19 @@ namespace ArenaApp.Services
         public Func<Button>? GetHideTextButton { get; set; }
         
         // Делегаты для событий
-        public Action<object, RoutedPropertyChangedEventArgs<double>>? SpeedSlider_ValueChanged { get; set; }
-        public Action<object, RoutedPropertyChangedEventArgs<double>>? OpacitySlider_ValueChanged { get; set; }
-        public Action<object, RoutedPropertyChangedEventArgs<double>>? VolumeSlider_ValueChanged { get; set; }
-        public Action<object, RoutedPropertyChangedEventArgs<double>>? ScaleSlider_ValueChanged { get; set; }
-        public Action<object, RoutedPropertyChangedEventArgs<double>>? RotationSlider_ValueChanged { get; set; }
-        public Action<object, SelectionChangedEventArgs>? TextColorComboBox_SelectionChanged { get; set; }
-        public Action<object, SelectionChangedEventArgs>? FontFamilyComboBox_SelectionChanged { get; set; }
-        public Action<object, RoutedPropertyChangedEventArgs<double>>? FontSizeSlider_ValueChanged { get; set; }
-        public Action<object, TextChangedEventArgs>? TextContentTextBox_TextChanged { get; set; }
-        public Action<object, RoutedEventArgs>? UseManualPositionCheckBox_Checked { get; set; }
-        public Action<object, RoutedEventArgs>? UseManualPositionCheckBox_Unchecked { get; set; }
-        public Action<object, TextChangedEventArgs>? TextXTextBox_TextChanged { get; set; }
-        public Action<object, TextChangedEventArgs>? TextYTextBox_TextChanged { get; set; }
+        public RoutedPropertyChangedEventHandler<double>? SpeedSlider_ValueChanged { get; set; }
+        public RoutedPropertyChangedEventHandler<double>? OpacitySlider_ValueChanged { get; set; }
+        public RoutedPropertyChangedEventHandler<double>? VolumeSlider_ValueChanged { get; set; }
+        public RoutedPropertyChangedEventHandler<double>? ScaleSlider_ValueChanged { get; set; }
+        public RoutedPropertyChangedEventHandler<double>? RotationSlider_ValueChanged { get; set; }
+        public SelectionChangedEventHandler? TextColorComboBox_SelectionChanged { get; set; }
+        public SelectionChangedEventHandler? FontFamilyComboBox_SelectionChanged { get; set; }
+        public RoutedPropertyChangedEventHandler<double>? FontSizeSlider_ValueChanged { get; set; }
+        public TextChangedEventHandler? TextContentTextBox_TextChanged { get; set; }
+        public RoutedEventHandler? UseManualPositionCheckBox_Checked { get; set; }
+        public RoutedEventHandler? UseManualPositionCheckBox_Unchecked { get; set; }
+        public TextChangedEventHandler? TextXTextBox_TextChanged { get; set; }
+        public TextChangedEventHandler? TextYTextBox_TextChanged { get; set; }
         
         // Делегаты для применения настроек
         public Action? ApplyElementSettings { get; set; }

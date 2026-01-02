@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -50,6 +51,7 @@ namespace ArenaApp.Services
         public Action<string>? RegisterActiveMediaFile { get; set; }
         public Func<string, bool>? IsMediaFileAlreadyPlaying { get; set; }
         public Func<string, MediaType, string, bool>? ShouldBlockMediaFile { get; set; }
+        public Func<string, string>? GetAbsoluteMediaPath { get; set; }  // Получение абсолютного пути с учетом режима хранения
         
         // Делегаты для работы с аудио слотами
         public Func<string, MediaElement?>? TryGetAudioSlot { get; set; }
@@ -96,6 +98,56 @@ namespace ArenaApp.Services
         }
         
         /// <summary>
+        /// Создает URI для медиафайла с правильной обработкой путей
+        /// </summary>
+        private Uri CreateMediaUri(string mediaPath)
+        {
+            System.Diagnostics.Debug.WriteLine($"CreateMediaUri: Начало, mediaPath={mediaPath}");
+            
+            if (string.IsNullOrEmpty(mediaPath))
+            {
+                System.Diagnostics.Debug.WriteLine($"CreateMediaUri: ОШИБКА - путь пустой");
+                throw new ArgumentException("Путь к медиафайлу пустой");
+            }
+            
+            // Получаем абсолютный путь с учетом режима хранения
+            string absolutePath = GetAbsoluteMediaPath?.Invoke(mediaPath) ?? mediaPath;
+            System.Diagnostics.Debug.WriteLine($"CreateMediaUri: После GetAbsoluteMediaPath, absolutePath={absolutePath}");
+            
+            // Нормализуем путь
+            try
+            {
+                absolutePath = Path.GetFullPath(absolutePath);
+                System.Diagnostics.Debug.WriteLine($"CreateMediaUri: После нормализации, absolutePath={absolutePath}");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"ОШИБКА при нормализации пути: {ex.Message}, Path={absolutePath}");
+                throw new ArgumentException($"Некорректный путь: {absolutePath}", ex);
+            }
+            
+            // Проверяем существование файла
+            if (!File.Exists(absolutePath))
+            {
+                System.Diagnostics.Debug.WriteLine($"ОШИБКА: Файл не существует: {absolutePath}");
+                throw new FileNotFoundException($"Файл не найден: {absolutePath}");
+            }
+            
+            // Создаем URI: для файловой системы .NET сам корректно формирует file:/// и экранирует пробелы и т.п.
+            try
+            {
+                var uri = new Uri(absolutePath, UriKind.Absolute);
+                System.Diagnostics.Debug.WriteLine($"CreateMediaUri: URI создан успешно: {uri}");
+                return uri;
+            }
+            catch (UriFormatException ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"CreateMediaUri: ОШИБКА создания URI: {ex.Message}, Path={absolutePath}");
+                throw new ArgumentException($"Невозможно создать URI из пути: {absolutePath}", ex);
+            }
+        }
+        
+        /// <summary>
         /// Обновляет MediaElement, сохраняя текстовые блоки
         /// </summary>
         public void UpdateMediaElement(MediaElement mediaElement)
@@ -105,97 +157,58 @@ namespace ArenaApp.Services
             
             if (mediaBorder?.Child is Grid mainGrid && textOverlayGrid != null)
             {
-                // Устанавливаем правильный Stretch для медиа
-                mediaElement.Stretch = Stretch.Uniform;
+                // КРИТИЧНО: НЕ трогаем MediaElement если он уже правильно настроен в XAML
+                // Манипуляции с элементом в визуальном дереве могут нарушить рендеринг
+                bool mediaElementInGrid = mainGrid.Children.Contains(mediaElement);
                 
-                // КРИТИЧНО: Используем Stretch выравнивания БЕЗ установки Width/Height
-                // Это позволяет mediaElement автоматически заполнять доступное пространство
-                mediaElement.HorizontalAlignment = HorizontalAlignment.Stretch;
-                mediaElement.VerticalAlignment = VerticalAlignment.Stretch;
-                mediaElement.Width = double.NaN; // Auto - позволяет растягиваться
-                mediaElement.Height = double.NaN; // Auto - позволяет растягиваться
-                
-                // КРИТИЧНО: Если размеры доступны, обновляем их после загрузки элемента
-                if (mediaBorder.ActualWidth > 0 && mediaBorder.ActualHeight > 0)
+                // Проверяем, нужно ли что-то делать
+                if (!mediaElementInGrid)
                 {
-                    // Размеры будут установлены автоматически через Stretch выравнивания
-                    System.Diagnostics.Debug.WriteLine($"UpdateMediaElement: mediaBorder размеры доступны - Width={mediaBorder.ActualWidth}, Height={mediaBorder.ActualHeight}");
-                }
-                else
-                {
-                    // Подписываемся на событие загрузки mediaBorder для обновления размеров
-                    mediaBorder.Loaded += (s, e) =>
+                    // MediaElement НЕ в Grid - это проблема, нужно добавить
+                    // Удаляем старые MediaElement и Image элементы
+                    var oldMediaElements = mainGrid.Children.OfType<MediaElement>().ToList();
+                    foreach (var old in oldMediaElements)
                     {
-                        if (mediaBorder.ActualWidth > 0 && mediaBorder.ActualHeight > 0)
-                        {
-                            System.Diagnostics.Debug.WriteLine($"UpdateMediaElement (Loaded): mediaBorder размеры стали доступны - Width={mediaBorder.ActualWidth}, Height={mediaBorder.ActualHeight}");
-                        }
-                    };
+                        mainGrid.Children.Remove(old);
+                    }
+                    
+                    var oldImages = mainGrid.Children.OfType<Image>().ToList();
+                    foreach (var oldImage in oldImages)
+                    {
+                        mainGrid.Children.Remove(oldImage);
+                    }
+                    
+                    // Добавляем MediaElement
+                    mainGrid.Children.Insert(0, mediaElement);
+                    System.Diagnostics.Debug.WriteLine($"UpdateMediaElement: MediaElement добавлен в Grid");
                 }
                 
-                // ВАЖНО: Устанавливаем видимость и прозрачность сразу
+                // КРИТИЧНО: НЕ трогаем Width, Height, HorizontalAlignment, VerticalAlignment!
+                // Они уже правильно установлены в XAML. Любые изменения могут нарушить layout.
+                // Устанавливаем только видимость и прозрачность
                 mediaElement.Visibility = Visibility.Visible;
+                
+                // Убеждаемся, что прозрачность правильная
                 if (mediaElement.Opacity <= 0)
                 {
                     mediaElement.Opacity = 1.0;
                 }
-                if (mediaBorder != null)
+                
+                mediaBorder.Visibility = Visibility.Visible;
+                mediaBorder.Opacity = 1.0;
+                
+                System.Diagnostics.Debug.WriteLine($"UpdateMediaElement: MediaElement - Visibility={mediaElement.Visibility}, Opacity={mediaElement.Opacity}. НЕ трогаем размеры и alignment!");
+                
+                // Убеждаемся, что textOverlayGrid в Grid
+                if (!mainGrid.Children.Contains(textOverlayGrid))
                 {
-                    mediaBorder.Visibility = Visibility.Visible;
-                    mediaBorder.Opacity = 1.0;
+                    mainGrid.Children.Add(textOverlayGrid);
+                    System.Diagnostics.Debug.WriteLine($"UpdateMediaElement: textOverlayGrid добавлен в Grid");
                 }
                 
-                // КРИТИЧНО: Убеждаемся, что mediaElement находится в Grid ПЕРЕД textOverlayGrid
-                // В Grid порядок элементов определяет Z-индекс - последний элемент поверх остальных
-                // Поэтому mediaElement должен быть первым (индекс 0), а textOverlayGrid - последним
-                
-                // Удаляем старый MediaElement если есть (но не тот же самый объект)
-                var oldMediaElement = mainGrid.Children.OfType<MediaElement>().FirstOrDefault();
-                if (oldMediaElement != null && oldMediaElement != mediaElement)
-                {
-                    mainGrid.Children.Remove(oldMediaElement);
-                }
-                
-                // Удаляем старые Image элементы если есть
-                var oldImages = mainGrid.Children.OfType<Image>().ToList();
-                foreach (var oldImage in oldImages)
-                {
-                    mainGrid.Children.Remove(oldImage);
-                }
-                
-                // Временно удаляем textOverlayGrid, чтобы правильно установить порядок
-                if (mainGrid.Children.Contains(textOverlayGrid))
-                {
-                    mainGrid.Children.Remove(textOverlayGrid);
-                }
-                
-                // Добавляем MediaElement первым (индекс 0) - он будет внизу
-                if (!mainGrid.Children.Contains(mediaElement))
-                {
-                    mainGrid.Children.Insert(0, mediaElement);
-                }
-                else
-                {
-                    // Если mediaElement уже есть, перемещаем его на первое место
-                    var currentIndex = mainGrid.Children.IndexOf(mediaElement);
-                    if (currentIndex > 0)
-                    {
-                        mainGrid.Children.RemoveAt(currentIndex);
-                        mainGrid.Children.Insert(0, mediaElement);
-                    }
-                }
-                
-                // Добавляем textOverlayGrid последним - он будет поверх mediaElement
-                mainGrid.Children.Add(textOverlayGrid);
-                
-                // КРИТИЧНО: Убеждаемся, что textOverlayGrid полностью прозрачен и не перекрывает видео
+                // Убеждаемся, что textOverlayGrid полностью прозрачен и не перекрывает видео
                 textOverlayGrid.Background = new SolidColorBrush(Colors.Transparent);
-                textOverlayGrid.IsHitTestVisible = false; // Позволяет событиям проходить сквозь к mediaElement
-                // КРИТИЧНО: Убеждаемся, что textOverlayGrid не имеет непрозрачного фона
-                if (textOverlayGrid.Background is SolidColorBrush brush && brush.Color.A > 0)
-                {
-                    textOverlayGrid.Background = new SolidColorBrush(Colors.Transparent);
-                }
+                textOverlayGrid.IsHitTestVisible = false;
                 
                 // Делаем textOverlayGrid невидимым если в нем нет текста
                 if (textOverlayGrid.Children.Count == 0)
@@ -206,6 +219,8 @@ namespace ArenaApp.Services
                 {
                     textOverlayGrid.Visibility = Visibility.Visible;
                 }
+                
+                System.Diagnostics.Debug.WriteLine($"UpdateMediaElement: Завершено. MediaElement.ActualWidth={mediaElement.ActualWidth}, ActualHeight={mediaElement.ActualHeight}");
             }
             else if (mediaBorder != null && textOverlayGrid != null)
             {
@@ -225,9 +240,12 @@ namespace ArenaApp.Services
         /// </summary>
         public Image CreateImageElement(string imagePath)
         {
+            // Используем CreateMediaUri для правильной обработки путей
+            Uri imageUri = CreateMediaUri(imagePath);
+            
             var imageElement = new Image
             {
-                Source = new BitmapImage(new Uri(imagePath)),
+                Source = new BitmapImage(imageUri),
                 Stretch = Stretch.Uniform,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center
@@ -380,13 +398,13 @@ namespace ArenaApp.Services
                 }
                 
                 secondaryWindow.Content = secondaryMediaElement;
-                secondaryMediaElement.Source = new Uri(mediaPath);
+                secondaryMediaElement.Source = CreateMediaUri(mediaPath);
             }
             else if (mediaType == MediaType.Image)
             {
                 var secondaryImageElement = new Image
                 {
-                    Source = new BitmapImage(new Uri(mediaPath)),
+                    Source = new BitmapImage(CreateMediaUri(mediaPath)),
                     Stretch = useUniformToFill ? Stretch.UniformToFill : Stretch.Uniform,
                     HorizontalAlignment = HorizontalAlignment.Stretch,
                     VerticalAlignment = VerticalAlignment.Stretch,
@@ -635,18 +653,66 @@ namespace ArenaApp.Services
                         // ВАЖНО: Устанавливаем LoadedBehavior ПЕРЕД установкой Source
                         element.LoadedBehavior = MediaState.Manual;
                         
-                        // Обновляем медиа, сохраняя текстовые блоки
-                        UpdateMediaElement(element);
-                        element.Source = new Uri(mediaSlot.MediaPath);
+                        // НЕ вызываем UpdateMediaElement - он нарушает layout!
+                        // MediaElement уже правильно настроен в XAML
                         
-                        // КРИТИЧНО: Убеждаемся, что все видимо и правильно настроено
+                        // Получаем абсолютный путь с учетом режима хранения
+                        string absolutePath = GetAbsoluteMediaPath?.Invoke(mediaSlot.MediaPath) ?? mediaSlot.MediaPath;
+                        
+                        // Проверяем и нормализуем путь
+                        if (string.IsNullOrEmpty(absolutePath))
+                        {
+                            System.Diagnostics.Debug.WriteLine($"ОШИБКА: Путь пустой для MediaPath={mediaSlot.MediaPath}");
+                            throw new ArgumentException($"Путь к медиафайлу пустой");
+                        }
+                        
+                        // Нормализуем путь
+                        try
+                        {
+                            absolutePath = Path.GetFullPath(absolutePath);
+                        }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"ОШИБКА при нормализации пути: {ex.Message}, Path={absolutePath}");
+                            throw new ArgumentException($"Некорректный путь: {absolutePath}", ex);
+                        }
+                        
+                        // Устанавливаем Source с проверкой пути
+                        if (!File.Exists(absolutePath))
+                        {
+                            System.Diagnostics.Debug.WriteLine($"ОШИБКА: Файл не существует: {absolutePath}");
+                            throw new FileNotFoundException($"Файл не найден: {absolutePath}");
+                        }
+                        
+                        // Создаем URI с правильным форматом
+                        Uri uri;
+                        try
+                        {
+                            // Используем file:/// для локальных файлов
+                            if (!absolutePath.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+                            {
+                                uri = new Uri(absolutePath, UriKind.Absolute);
+                            }
+                            else
+                            {
+                                uri = new Uri(absolutePath);
+                            }
+                        }
+                        catch (UriFormatException ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"ОШИБКА создания URI: {ex.Message}, Path={absolutePath}");
+                            // Пробуем через file:///
+                            uri = new Uri(new Uri("file:///"), absolutePath);
+                        }
+                        
+                        System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot: Устанавливаем Source: {uri}");
+                        element.Source = uri;
+                        
+                        // Устанавливаем только видимость и прозрачность
                         element.Visibility = Visibility.Visible;
-                        element.Opacity = 1.0; // Принудительно устанавливаем непрозрачность
-                        element.HorizontalAlignment = HorizontalAlignment.Stretch;
-                        element.VerticalAlignment = VerticalAlignment.Stretch;
-                        element.Width = double.NaN; // Auto
-                        element.Height = double.NaN; // Auto
-                        element.Stretch = Stretch.Uniform;
+                        element.Opacity = 1.0;
+                        
+                        System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (Transition): MediaElement - Visibility={element.Visibility}, Opacity={element.Opacity}. Grid размер {mediaBorder?.ActualWidth}x{mediaBorder?.ActualHeight}");
                         
                         if (mediaBorder != null)
                         {
@@ -669,9 +735,15 @@ namespace ArenaApp.Services
                         
                         System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (Transition): mediaElement.Visibility={element.Visibility}, Opacity={element.Opacity}, Source={element.Source?.LocalPath}");
                         System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (Transition): mediaElement.Width={element.Width}, Height={element.Height}, Stretch={element.Stretch}");
+                        
+                        // НЕ вызываем Play() здесь - он будет вызван после завершения перехода
                     },
                     () => SyncVideoToSecondaryScreen(mediaSlot, slotKey)
                 );
+                
+                // КРИТИЧНО: Play() теперь вызывается в MainWindow.xaml.cs после загрузки
+                // Это решает проблему с нулевым размером MediaElement
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (After Transition): Загрузка завершена, Play() будет вызван в MainWindow.xaml.cs");
             }
             else
             {
@@ -682,17 +754,57 @@ namespace ArenaApp.Services
                 // ВАЖНО: Устанавливаем LoadedBehavior ПЕРЕД установкой Source
                 mediaElement.LoadedBehavior = MediaState.Manual;
                 
-                UpdateMediaElement(mediaElement);
-                mediaElement.Source = new Uri(mediaSlot.MediaPath);
+                // НЕ вызываем UpdateMediaElement - он нарушает layout!
+                // MediaElement уже правильно настроен в XAML
                 
-                // КРИТИЧНО: Убеждаемся, что все видимо и правильно настроено
+                // Получаем абсолютный путь с учетом режима хранения
+                string absolutePath = GetAbsoluteMediaPath?.Invoke(mediaSlot.MediaPath) ?? mediaSlot.MediaPath;
+                
+                // Проверяем и нормализуем путь
+                if (string.IsNullOrEmpty(absolutePath))
+                {
+                    System.Diagnostics.Debug.WriteLine($"ОШИБКА: Путь пустой для MediaPath={mediaSlot.MediaPath}");
+                    throw new ArgumentException($"Путь к медиафайлу пустой");
+                }
+                
+                // Нормализуем путь
+                try
+                {
+                    absolutePath = Path.GetFullPath(absolutePath);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"ОШИБКА при нормализации пути: {ex.Message}, Path={absolutePath}");
+                    throw new ArgumentException($"Некорректный путь: {absolutePath}", ex);
+                }
+                
+                // Устанавливаем Source с проверкой пути
+                if (!File.Exists(absolutePath))
+                {
+                    System.Diagnostics.Debug.WriteLine($"ОШИБКА: Файл не существует: {absolutePath}");
+                    throw new FileNotFoundException($"Файл не найден: {absolutePath}");
+                }
+                
+                // Создаем URI с правильным форматом
+                Uri uri;
+                try
+                {
+                    uri = new Uri(absolutePath, UriKind.Absolute);
+                }
+                catch (UriFormatException ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"ОШИБКА создания URI: {ex.Message}, Path={absolutePath}");
+                    // Пробуем через file:///
+                    uri = new Uri(new Uri("file:///"), absolutePath);
+                }
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot: Устанавливаем Source: {uri}");
+                mediaElement.Source = uri;
+                
+                // Устанавливаем только видимость и прозрачность
                 mediaElement.Visibility = Visibility.Visible;
-                mediaElement.Opacity = 1.0; // Принудительно устанавливаем непрозрачность
-                mediaElement.HorizontalAlignment = HorizontalAlignment.Stretch;
-                mediaElement.VerticalAlignment = VerticalAlignment.Stretch;
-                mediaElement.Width = double.NaN; // Auto
-                mediaElement.Height = double.NaN; // Auto
-                mediaElement.Stretch = Stretch.Uniform;
+                mediaElement.Opacity = 1.0;
+                
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (No Transition): MediaElement - Visibility={mediaElement.Visibility}, Opacity={mediaElement.Opacity}. Grid размер {mediaBorder?.ActualWidth}x{mediaBorder?.ActualHeight}");
                 
                 if (mediaBorder != null)
                 {
@@ -716,6 +828,10 @@ namespace ArenaApp.Services
                 
                 RegisterActiveMediaFile?.Invoke(mediaSlot.MediaPath);
                 SyncVideoToSecondaryScreen(mediaSlot, slotKey);
+                
+                // КРИТИЧНО: Play() теперь вызывается в MainWindow.xaml.cs после загрузки
+                // Это решает проблему с нулевым размером MediaElement
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (No Transition): Загрузка завершена, Play() будет вызван в MainWindow.xaml.cs");
             }
             
             // Возобновляем с сохраненной позиции слота и запускаем воспроизведение
@@ -750,7 +866,11 @@ namespace ArenaApp.Services
                 System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): mediaBorder.Visibility={mediaBorder?.Visibility}, textOverlayGrid.Background={textOverlayGrid?.Background}");
                 System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): mediaElement.Width={mediaElement.Width}, Height={mediaElement.Height}");
                 System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): mediaElement.ActualWidth={mediaElement.ActualWidth}, ActualHeight={mediaElement.ActualHeight}");
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): mediaElement.HorizontalAlignment={mediaElement.HorizontalAlignment}, VerticalAlignment={mediaElement.VerticalAlignment}");
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): mediaElement.Stretch={mediaElement.Stretch}");
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): mediaElement.NaturalVideoWidth={mediaElement.NaturalVideoWidth}, NaturalVideoHeight={mediaElement.NaturalVideoHeight}");
                 System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): mediaBorder.ActualWidth={mediaBorder?.ActualWidth}, ActualHeight={mediaBorder?.ActualHeight}");
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): mainGrid.ActualWidth={mainGrid?.ActualWidth}, ActualHeight={mainGrid?.ActualHeight}");
                 System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): mediaElement в Grid={mainGrid?.Children.Contains(mediaElement) ?? false}");
                 System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): Индекс mediaElement в Grid={mainGrid?.Children.IndexOf(mediaElement) ?? -1}");
                 System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): Индекс textOverlayGrid в Grid={mainGrid?.Children.IndexOf(textOverlayGrid) ?? -1}");
@@ -760,7 +880,10 @@ namespace ArenaApp.Services
                     System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): Дети Grid: {string.Join(", ", mainGrid.Children.Cast<UIElement>().Select(c => $"{c.GetType().Name}(Z={mainGrid.Children.IndexOf(c)})"))}");
                 }
                 
-                // КРИТИЧНО: Убеждаемся, что mediaElement правильно настроен для отображения
+                // КРИТИЧНО: В обработчике MediaOpened НЕ трогаем размеры и alignment!
+                // XAML уже правильно настроил MediaElement, любые изменения здесь нарушают layout
+                
+                // Устанавливаем только видимость и прозрачность
                 mediaElement.Visibility = Visibility.Visible;
                 if (mediaElement.Opacity <= 0)
                 {
@@ -768,67 +891,26 @@ namespace ArenaApp.Services
                     System.Diagnostics.Debug.WriteLine($"ПРЕДУПРЕЖДЕНИЕ: Прозрачность mediaElement была 0 в MediaOpened, устанавливаем 1.0");
                 }
                 
-                // КРИТИЧНО: Убеждаемся, что mediaElement растягивается на весь доступный размер
-                mediaElement.HorizontalAlignment = HorizontalAlignment.Stretch;
-                mediaElement.VerticalAlignment = VerticalAlignment.Stretch;
-                mediaElement.Width = double.NaN; // Auto
-                mediaElement.Height = double.NaN; // Auto
-                mediaElement.Stretch = Stretch.Uniform;
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): MediaElement - НЕ изменяем свойства, оставляем как в XAML");
                 
-                // КРИТИЧНО: Проверяем размеры
-                if (mediaElement.ActualWidth <= 0 || mediaElement.ActualHeight <= 0)
-                {
-                    System.Diagnostics.Debug.WriteLine($"ПРОБЛЕМА: mediaElement имеет нулевой размер! ActualWidth={mediaElement.ActualWidth}, ActualHeight={mediaElement.ActualHeight}");
-                    System.Diagnostics.Debug.WriteLine($"ПРОБЛЕМА: mediaBorder.ActualWidth={mediaBorder?.ActualWidth}, ActualHeight={mediaBorder?.ActualHeight}");
-                    System.Diagnostics.Debug.WriteLine($"ПРОБЛЕМА: mainGrid.ActualWidth={mainGrid?.ActualWidth}, ActualHeight={mainGrid?.ActualHeight}");
-                    
-                    // Принудительно обновляем layout
-                    if (mainGrid != null)
-                    {
-                        mainGrid.InvalidateMeasure();
-                        mainGrid.InvalidateArrange();
-                        System.Diagnostics.Debug.WriteLine($"ИСПРАВЛЕНИЕ: Вызваны InvalidateMeasure и InvalidateArrange для mainGrid");
-                    }
-                    
-                    // Планируем повторную проверку через небольшую задержку
-                    var dispatcher = GetDispatcher?.Invoke();
-                    if (dispatcher != null)
-                    {
-                        dispatcher.BeginInvoke(new Action(() =>
-                        {
-                            if (mediaElement.ActualWidth <= 0 || mediaElement.ActualHeight <= 0)
-                            {
-                                System.Diagnostics.Debug.WriteLine($"ПРОБЛЕМА ПОВТОР: mediaElement все еще имеет нулевой размер после обновления layout!");
-                                System.Diagnostics.Debug.WriteLine($"ПРОБЛЕМА ПОВТОР: mediaElement.ActualWidth={mediaElement.ActualWidth}, ActualHeight={mediaElement.ActualHeight}");
-                                System.Diagnostics.Debug.WriteLine($"ПРОБЛЕМА ПОВТОР: mediaBorder.ActualWidth={mediaBorder?.ActualWidth}, ActualHeight={mediaBorder?.ActualHeight}");
-                            }
-                        }), System.Windows.Threading.DispatcherPriority.Loaded);
-                    }
-                }
+                // Проверяем размеры для диагностики ПОСЛЕ UpdateLayout
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): mediaElement - ActualWidth={mediaElement.ActualWidth}, ActualHeight={mediaElement.ActualHeight}");
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): mediaElement - Width={mediaElement.Width}, Height={mediaElement.Height}");
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): mediaElement - Visibility={mediaElement.Visibility}, Opacity={mediaElement.Opacity}");
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): mediaBorder - ActualWidth={mediaBorder?.ActualWidth}, ActualHeight={mediaBorder?.ActualHeight}, Visibility={mediaBorder?.Visibility}");
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): mainGrid - ActualWidth={mainGrid?.ActualWidth}, ActualHeight={mainGrid?.ActualHeight}");
                 
-                // КРИТИЧНО: Убеждаемся, что textOverlayGrid не перекрывает видео визуально
-                if (textOverlayGrid != null && mainGrid != null)
+                // НЕ перемещаем элементы - это нарушает layout
+                // Убеждаемся, что textOverlayGrid полностью прозрачен
+                if (textOverlayGrid != null)
                 {
-                    // Проверяем порядок элементов - textOverlayGrid должен быть последним
-                    var mediaIndex = mainGrid.Children.IndexOf(mediaElement);
-                    var textIndex = mainGrid.Children.IndexOf(textOverlayGrid);
-                    
-                    if (textIndex >= 0 && mediaIndex >= 0 && textIndex <= mediaIndex)
-                    {
-                        // textOverlayGrid должен быть после mediaElement
-                        mainGrid.Children.Remove(textOverlayGrid);
-                        mainGrid.Children.Add(textOverlayGrid);
-                        System.Diagnostics.Debug.WriteLine($"ИСПРАВЛЕНИЕ: Перемещен textOverlayGrid в конец Grid для правильного Z-индекса");
-                    }
-                    
-                    // Убеждаемся, что textOverlayGrid полностью прозрачен
                     textOverlayGrid.Background = new SolidColorBrush(Colors.Transparent);
                     textOverlayGrid.IsHitTestVisible = false;
                     
                     // Если в textOverlayGrid нет детей, скрываем его
                     if (textOverlayGrid.Children.Count == 0)
                     {
-                        textOverlayGrid.Visibility = Visibility.Collapsed; // Collapsed вместо Hidden для полного скрытия
+                        textOverlayGrid.Visibility = Visibility.Collapsed;
                     }
                 }
                 
@@ -890,21 +972,11 @@ namespace ArenaApp.Services
                     System.Diagnostics.Debug.WriteLine($"ПРЕДУПРЕЖДЕНИЕ LoadVideoFromSlot: Прозрачность была {currentOpacity}, устанавливаем 1.0");
                 }
                 
-                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot: Запускаем видео, Source={mediaElement.Source?.LocalPath}, Opacity={mediaElement.Opacity}, Visibility={mediaElement.Visibility}");
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): Устанавливаем позицию и запускаем, Source={mediaElement.Source?.LocalPath}, Opacity={mediaElement.Opacity}, Visibility={mediaElement.Visibility}");
                 
-                // Запускаем воспроизведение после загрузки
-                mediaElement.Play();
-                
-                // Синхронизируем воспроизведение с дополнительным экраном
-                var secondaryMediaElement = GetSecondaryMediaElement?.Invoke();
-                if (secondaryMediaElement != null)
-                {
-                    secondaryMediaElement.Visibility = Visibility.Visible;
-                    secondaryMediaElement.Play();
-                    System.Diagnostics.Debug.WriteLine($"СИНХРОНИЗАЦИЯ ВОСПРОИЗВЕДЕНИЯ: Запущено воспроизведение на дополнительном экране");
-                }
-                
-                SetIsVideoPlaying?.Invoke(true);
+                // КРИТИЧНО: Play() теперь вызывается в MainWindow.xaml.cs после загрузки
+                // Это решает проблему с нулевым размером MediaElement
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot (MediaOpened): Загрузка завершена, Play() будет вызван в MainWindow.xaml.cs");
             };
             
             mediaElement.MediaOpened += mediaOpenedHandler;
@@ -948,19 +1020,65 @@ namespace ArenaApp.Services
                 }
                 
                 System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot: Запускаем уже загруженное видео, Source={mediaElement.Source?.LocalPath}, Opacity={mediaElement.Opacity}, Visibility={mediaElement.Visibility}");
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot: LoadedBehavior={mediaElement.LoadedBehavior}, NaturalDuration.HasTimeSpan={mediaElement.NaturalDuration.HasTimeSpan}");
                 
-                mediaElement.Play();
-                
-                var secondaryMediaElement = GetSecondaryMediaElement?.Invoke();
-                if (secondaryMediaElement != null)
+                // КРИТИЧНО: Убеждаемся, что LoadedBehavior установлен правильно
+                if (mediaElement.LoadedBehavior != MediaState.Manual)
                 {
-                    secondaryMediaElement.Visibility = Visibility.Visible;
-                    secondaryMediaElement.Play();
+                    System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot: Исправляем LoadedBehavior с {mediaElement.LoadedBehavior} на Manual");
+                    mediaElement.LoadedBehavior = MediaState.Manual;
                 }
                 
+                // КРИТИЧНО: Проверяем текущее состояние перед Play()
+                try
+                {
+                    var clock = mediaElement.Clock;
+                    var currentState = clock?.CurrentState;
+                    System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot: Состояние перед Play() - Clock={clock != null}, CurrentState={currentState}");
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot: Не удалось проверить состояние - {ex.Message}");
+                }
+                
+                // КРИТИЧНО: Вызываем Play() и проверяем результат
+                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot: Вызываем Play() для уже загруженного видео");
+                mediaElement.Play();
                 SetIsVideoPlaying?.Invoke(true);
                 
-                // Применяем настройки элемента ПОСЛЕ запуска видео
+                // КРИТИЧНО: Проверяем состояние сразу после Play()
+                var checkDispatcher = GetDispatcher?.Invoke();
+                if (checkDispatcher != null)
+                {
+                    _ = checkDispatcher.BeginInvoke(new Action(() =>
+                    {
+                        try
+                        {
+                            var clock = mediaElement.Clock;
+                            var currentState = clock?.CurrentState;
+                            System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot: Состояние после Play() - Clock={clock != null}, CurrentState={currentState}, Position={mediaElement.Position}");
+                            
+                            // Если видео не играет, пытаемся запустить еще раз
+                            if (currentState != System.Windows.Media.Animation.ClockState.Active)
+                            {
+                                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot: ВИДЕО НЕ ИГРАЕТ! Состояние={currentState}, пытаемся запустить снова");
+                                mediaElement.Play();
+                                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot: Повторный Play() вызван");
+                            }
+                            else
+                            {
+                                System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot: ВИДЕО ИГРАЕТ! Position={mediaElement.Position}");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"LoadVideoFromSlot: ОШИБКА при проверке состояния - {ex.Message}");
+                        }
+                    }), System.Windows.Threading.DispatcherPriority.Loaded);
+                }
+                
+                // КРИТИЧНО: Play() для дополнительного экрана теперь вызывается в MainWindow.xaml.cs
+                // Применяем настройки элемента ПОСЛЕ загрузки видео
                 ApplyElementSettings?.Invoke(mediaSlot, slotKey);
             }
         }
@@ -968,13 +1086,19 @@ namespace ArenaApp.Services
         private void SyncVideoToSecondaryScreen(MediaSlot mediaSlot, string slotKey)
         {
             var secondaryWindow = GetSecondaryScreenWindow?.Invoke();
-            if (secondaryWindow == null) return;
+            if (secondaryWindow == null)
+            {
+                System.Diagnostics.Debug.WriteLine("SyncVideoToSecondaryScreen: secondaryWindow == null");
+                return;
+            }
             
             var secondaryMediaElement = GetSecondaryMediaElement?.Invoke();
             var useUniformToFill = GetUseUniformToFill?.Invoke() ?? false;
             
+            // Если MediaElement еще не создан, создаем его
             if (secondaryMediaElement == null)
             {
+                System.Diagnostics.Debug.WriteLine("SyncVideoToSecondaryScreen: Создаем новый MediaElement для второго экрана");
                 secondaryMediaElement = new MediaElement
                 {
                     LoadedBehavior = MediaState.Manual,
@@ -987,83 +1111,91 @@ namespace ArenaApp.Services
                 SetSecondaryMediaElement?.Invoke(secondaryMediaElement);
             }
             
-            // Получаем или создаем Grid для второго экрана, чтобы сохранить текстовые элементы
-            Grid? secondaryGrid = null;
+            // Убеждаемся, что MediaElement правильно настроен
+            secondaryMediaElement.LoadedBehavior = MediaState.Manual;
+            secondaryMediaElement.Stretch = useUniformToFill ? Stretch.UniformToFill : Stretch.Uniform;
+            secondaryMediaElement.HorizontalAlignment = HorizontalAlignment.Stretch;
+            secondaryMediaElement.VerticalAlignment = VerticalAlignment.Stretch;
+            secondaryMediaElement.Margin = new Thickness(0);
+            secondaryMediaElement.Visibility = Visibility.Visible;
             
-            if (secondaryWindow.Content is Grid existingGrid)
+            // Если окно уже имеет MediaElement как Content напрямую, используем его
+            if (secondaryWindow.Content == secondaryMediaElement)
             {
-                secondaryGrid = existingGrid;
-                // Удаляем старые MediaElement и Image элементы, но сохраняем TextBlock
-                var oldMediaElements = secondaryGrid.Children.OfType<MediaElement>().ToList();
-                foreach (var oldMedia in oldMediaElements)
+                System.Diagnostics.Debug.WriteLine("SyncVideoToSecondaryScreen: MediaElement уже является Content окна");
+            }
+            else if (secondaryWindow.Content is Grid existingGrid)
+            {
+                // Если Content - Grid, проверяем, есть ли там MediaElement
+                var existingMedia = existingGrid.Children.OfType<MediaElement>().FirstOrDefault();
+                if (existingMedia != secondaryMediaElement)
                 {
-                    secondaryGrid.Children.Remove(oldMedia);
-                }
-                var oldImages = secondaryGrid.Children.OfType<Image>().ToList();
-                foreach (var oldImage in oldImages)
-                {
-                    secondaryGrid.Children.Remove(oldImage);
+                    // Удаляем старые MediaElement и Image элементы
+                    var oldMediaElements = existingGrid.Children.OfType<MediaElement>().ToList();
+                    foreach (var oldMedia in oldMediaElements)
+                    {
+                        existingGrid.Children.Remove(oldMedia);
+                    }
+                    var oldImages = existingGrid.Children.OfType<System.Windows.Controls.Image>().ToList();
+                    foreach (var oldImage in oldImages)
+                    {
+                        existingGrid.Children.Remove(oldImage);
+                    }
+                    
+                    // Добавляем наш MediaElement
+                    if (!existingGrid.Children.Contains(secondaryMediaElement))
+                    {
+                        existingGrid.Children.Insert(0, secondaryMediaElement);
+                    }
                 }
             }
             else
             {
-                // Если Content не Grid, создаем новый Grid
-                secondaryGrid = new Grid();
-                var existingContent = secondaryWindow.Content;
-                
-                // Проверяем, является ли существующий контент нашим MediaElement
-                if (existingContent == secondaryMediaElement)
-                {
-                    // MediaElement уже является Content, просто устанавливаем Grid как новый Content
-                    secondaryWindow.Content = secondaryGrid;
-                }
-                else
-                {
-                    // Если существующий контент другой, перемещаем его в Grid
-                    secondaryWindow.Content = null;
-                    
-                    if (existingContent is UIElement uiElement && uiElement != secondaryMediaElement)
-                    {
-                        secondaryGrid.Children.Add(uiElement);
-                    }
-                    
-                    secondaryWindow.Content = secondaryGrid;
-                }
+                // Если Content другой, устанавливаем MediaElement напрямую
+                System.Diagnostics.Debug.WriteLine("SyncVideoToSecondaryScreen: Устанавливаем MediaElement как Content окна");
+                secondaryWindow.Content = secondaryMediaElement;
             }
-            
-            // Добавляем MediaElement в Grid (под текстом, ZIndex = 0 по умолчанию)
-            if (!secondaryGrid.Children.Contains(secondaryMediaElement))
-            {
-                secondaryGrid.Children.Insert(0, secondaryMediaElement);
-            }
-            
-            // Убеждаемся, что Grid установлен как Content окна
-            if (secondaryWindow.Content != secondaryGrid)
-            {
-                secondaryWindow.Content = secondaryGrid;
-            }
-            
-            // Убеждаемся, что MediaElement видим
-            secondaryMediaElement.Visibility = Visibility.Visible;
             
             // Останавливаем предыдущее воспроизведение перед установкой нового Source
             if (secondaryMediaElement.Source != null)
             {
                 secondaryMediaElement.Stop();
+                secondaryMediaElement.Source = null;
             }
             
             // ВАЖНО: Устанавливаем LoadedBehavior ПЕРЕД установкой Source
             secondaryMediaElement.LoadedBehavior = MediaState.Manual;
             
-            secondaryMediaElement.Source = new Uri(mediaSlot.MediaPath);
+            // Получаем абсолютный путь с учетом режима хранения
+            string absolutePath = GetAbsoluteMediaPath?.Invoke(mediaSlot.MediaPath) ?? mediaSlot.MediaPath;
+            
+            // Устанавливаем Source
+            try
+            {
+                secondaryMediaElement.Source = new Uri(absolutePath);
+                System.Diagnostics.Debug.WriteLine($"SyncVideoToSecondaryScreen: Установлен Source={absolutePath}");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"SyncVideoToSecondaryScreen: ОШИБКА при установке Source - {ex.Message}");
+                return;
+            }
             
             var slotPosition = GetSlotPosition?.Invoke(slotKey) ?? TimeSpan.Zero;
-            secondaryMediaElement.MediaOpened += (s, e) =>
+            
+            // Обработчик MediaOpened для запуска воспроизведения
+            RoutedEventHandler? mediaOpenedHandler = null;
+            mediaOpenedHandler = (s, e) =>
             {
-                // КРИТИЧНО: Проверяем, что secondaryMediaElement не null и сохраняем в локальную переменную
                 var element = secondaryMediaElement;
                 if (element == null) return;
                 
+                // Удаляем обработчик, чтобы не вызывать его повторно
+                element.MediaOpened -= mediaOpenedHandler;
+                
+                System.Diagnostics.Debug.WriteLine($"SyncVideoToSecondaryScreen: MediaOpened, Visibility={element.Visibility}, Opacity={element.Opacity}");
+                
+                // Устанавливаем позицию если нужно
                 if (slotPosition > TimeSpan.Zero)
                 {
                     var duration = element.NaturalDuration;
@@ -1084,8 +1216,30 @@ namespace ArenaApp.Services
                         element.Position = slotPosition;
                     }
                 }
+                
+                // Убеждаемся, что элемент видим и непрозрачен
+                element.Visibility = Visibility.Visible;
+                element.Opacity = 1.0;
+                
+                // Запускаем воспроизведение
                 element.Play();
+                System.Diagnostics.Debug.WriteLine($"SyncVideoToSecondaryScreen: Запущено воспроизведение на втором экране");
             };
+            
+            secondaryMediaElement.MediaOpened += mediaOpenedHandler;
+            
+            // Если медиа уже загружено, запускаем сразу
+            if (secondaryMediaElement.NaturalDuration.HasTimeSpan)
+            {
+                System.Diagnostics.Debug.WriteLine("SyncVideoToSecondaryScreen: Медиа уже загружено, запускаем сразу");
+                secondaryMediaElement.Visibility = Visibility.Visible;
+                secondaryMediaElement.Opacity = 1.0;
+                if (slotPosition > TimeSpan.Zero)
+                {
+                    secondaryMediaElement.Position = slotPosition;
+                }
+                secondaryMediaElement.Play();
+            }
             
             System.Diagnostics.Debug.WriteLine($"СИНХРОНИЗАЦИЯ МЕДИА: Передан файл {mediaSlot.MediaPath} на дополнительный экран");
         }
@@ -1127,16 +1281,18 @@ namespace ArenaApp.Services
             if (secondaryWindow == null) return;
             
             var useUniformToFill = GetUseUniformToFill?.Invoke() ?? false;
-            var secondaryImageElement = new Image
+            var secondaryImageElement = new System.Windows.Controls.Image
             {
-                Source = new BitmapImage(new Uri(mediaSlot.MediaPath)),
+                Source = new BitmapImage(CreateMediaUri(mediaSlot.MediaPath)),
                 Stretch = useUniformToFill ? Stretch.UniformToFill : Stretch.Uniform,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 VerticalAlignment = VerticalAlignment.Stretch,
-                Margin = new Thickness(0)
+                Margin = new Thickness(0),
+                Width = double.NaN, // Auto - растягивается на весь экран
+                Height = double.NaN // Auto - растягивается на весь экран
             };
             
-            // Получаем или создаем Grid для второго экрана, чтобы сохранить текстовые элементы
+            // Получаем или создаем Grid для второго экрана
             Grid? secondaryGrid = null;
             if (secondaryWindow.Content is Grid existingGrid)
             {
@@ -1147,7 +1303,7 @@ namespace ArenaApp.Services
                 {
                     secondaryGrid.Children.Remove(oldMedia);
                 }
-                var oldImages = secondaryGrid.Children.OfType<Image>().ToList();
+                var oldImages = secondaryGrid.Children.OfType<System.Windows.Controls.Image>().ToList();
                 foreach (var oldImage in oldImages)
                 {
                     secondaryGrid.Children.Remove(oldImage);
@@ -1155,8 +1311,14 @@ namespace ArenaApp.Services
             }
             else
             {
-                // Если Content не Grid, создаем новый Grid и перемещаем существующий контент
-                secondaryGrid = new Grid();
+                // Если Content не Grid, создаем новый Grid
+                secondaryGrid = new Grid
+                {
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    VerticalAlignment = VerticalAlignment.Stretch,
+                    Margin = new Thickness(0)
+                };
+                
                 var existingContent = secondaryWindow.Content;
                 secondaryWindow.Content = null;
                 
@@ -1168,8 +1330,24 @@ namespace ArenaApp.Services
                 secondaryWindow.Content = secondaryGrid;
             }
             
+            // Убеждаемся, что Grid правильно настроен
+            secondaryGrid.HorizontalAlignment = HorizontalAlignment.Stretch;
+            secondaryGrid.VerticalAlignment = VerticalAlignment.Stretch;
+            secondaryGrid.Margin = new Thickness(0);
+            
             // Добавляем Image в Grid (под текстом, ZIndex = 0 по умолчанию)
-            secondaryGrid.Children.Insert(0, secondaryImageElement);
+            if (!secondaryGrid.Children.Contains(secondaryImageElement))
+            {
+                secondaryGrid.Children.Insert(0, secondaryImageElement);
+            }
+            
+            // Убеждаемся, что Grid установлен как Content окна
+            if (secondaryWindow.Content != secondaryGrid)
+            {
+                secondaryWindow.Content = secondaryGrid;
+            }
+            
+            System.Diagnostics.Debug.WriteLine($"СИНХРОНИЗАЦИЯ ИЗОБРАЖЕНИЯ: Передано изображение {mediaSlot.MediaPath} на дополнительный экран");
             
             System.Diagnostics.Debug.WriteLine($"СИНХРОНИЗАЦИЯ ИЗОБРАЖЕНИЯ: Передано изображение {mediaSlot.MediaPath} на дополнительный экран");
         }
@@ -1209,7 +1387,7 @@ namespace ArenaApp.Services
                 // Создаем новый аудио элемент
                 audioElement = new MediaElement
                 {
-                    Source = new Uri(mediaSlot.MediaPath),
+                    Source = CreateMediaUri(mediaSlot.MediaPath),
                     LoadedBehavior = MediaState.Manual
                 };
                 

@@ -39,18 +39,18 @@ namespace ArenaApp.Services
         public Func<CheckBox>? GetLoopPlaylistCheckBox { get; set; }
         
         // Делегаты для событий
-        public Action<object, RoutedEventArgs>? UseGlobalVolumeCheckBox_Changed { get; set; }
-        public Action<object, RoutedPropertyChangedEventArgs<double>>? GlobalVolumeSlider_ValueChanged { get; set; }
-        public Action<object, RoutedEventArgs>? UseGlobalOpacityCheckBox_Changed { get; set; }
-        public Action<object, RoutedPropertyChangedEventArgs<double>>? GlobalOpacitySlider_ValueChanged { get; set; }
-        public Action<object, RoutedEventArgs>? UseGlobalScaleCheckBox_Changed { get; set; }
-        public Action<object, RoutedPropertyChangedEventArgs<double>>? GlobalScaleSlider_ValueChanged { get; set; }
-        public Action<object, RoutedEventArgs>? UseGlobalRotationCheckBox_Changed { get; set; }
-        public Action<object, RoutedPropertyChangedEventArgs<double>>? GlobalRotationSlider_ValueChanged { get; set; }
-        public Action<object, SelectionChangedEventArgs>? TransitionTypeComboBox_SelectionChanged { get; set; }
-        public Action<object, RoutedPropertyChangedEventArgs<double>>? TransitionDurationSlider_ValueChanged { get; set; }
-        public Action<object, RoutedEventArgs>? AutoPlayNextCheckBox_Changed { get; set; }
-        public Action<object, RoutedEventArgs>? LoopPlaylistCheckBox_Changed { get; set; }
+        public RoutedEventHandler? UseGlobalVolumeCheckBox_Changed { get; set; }
+        public RoutedPropertyChangedEventHandler<double>? GlobalVolumeSlider_ValueChanged { get; set; }
+        public RoutedEventHandler? UseGlobalOpacityCheckBox_Changed { get; set; }
+        public RoutedPropertyChangedEventHandler<double>? GlobalOpacitySlider_ValueChanged { get; set; }
+        public RoutedEventHandler? UseGlobalScaleCheckBox_Changed { get; set; }
+        public RoutedPropertyChangedEventHandler<double>? GlobalScaleSlider_ValueChanged { get; set; }
+        public RoutedEventHandler? UseGlobalRotationCheckBox_Changed { get; set; }
+        public RoutedPropertyChangedEventHandler<double>? GlobalRotationSlider_ValueChanged { get; set; }
+        public SelectionChangedEventHandler? TransitionTypeComboBox_SelectionChanged { get; set; }
+        public RoutedPropertyChangedEventHandler<double>? TransitionDurationSlider_ValueChanged { get; set; }
+        public RoutedEventHandler? AutoPlayNextCheckBox_Changed { get; set; }
+        public RoutedEventHandler? LoopPlaylistCheckBox_Changed { get; set; }
         
         // Делегаты для сохранения проекта
         public Action? SaveProject { get; set; }

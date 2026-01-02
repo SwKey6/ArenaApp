@@ -45,6 +45,14 @@
         "net8.0-windows7.0": {
           "targetAlias": "net8.0-windows",
           "dependencies": {
+            "LibVLCSharp": {
+              "target": "Package",
+              "version": "[3.9.0, )"
+            },
+            "LibVLCSharp.WPF": {
+              "target": "Package",
+              "version": "[3.9.0, )"
+            },
             "Microsoft.VisualBasic": {
               "target": "Package",
               "version": "[10.3.0, )"
@@ -56,6 +64,10 @@
             "System.Windows.Forms": {
               "target": "Package",
               "version": "[4.0.0, )"
+            },
+            "VideoLAN.LibVLC.Windows": {
+              "target": "Package",
+              "version": "[3.0.20, )"
             }
           },
           "imports": [

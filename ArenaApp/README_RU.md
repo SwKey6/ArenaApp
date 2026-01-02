@@ -56,6 +56,12 @@ dotnet restore
   - NAudio 2.2.1
   - Microsoft.VisualBasic 10.3.0
   - System.Windows.Forms 4.0.0
+  - LibVLCSharp / LibVLCSharp.WPF (встроенный видеодвижок)
+  - VideoLAN.LibVLC.Windows (нативные библиотеки VLC)
+
+## Важно про воспроизведение видео (без кодеков у пользователя)
+
+Приложение использует **LibVLC (LibVLCSharp)** для воспроизведения видео, чтобы видео работало у любого пользователя без дополнительных установок кодеков (в отличие от стандартного WPF `MediaElement`, который зависит от Windows Media Foundation и может выдавать ошибки вроде `0xC00D109B`).
 
 ## Changelog
 

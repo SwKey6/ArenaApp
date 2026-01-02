@@ -196,6 +196,10 @@ public partial class MainWindow : Window
     // Окна для вывода на дополнительные экраны
     private Window? _secondaryScreenWindow = null;
     private MediaElement? _secondaryMediaElement = null;
+
+    // VLC видео (встроенные декодеры)
+    private readonly Services.VlcVideoService _vlcVideoService = new();
+    private LibVLCSharp.WPF.VideoView? _secondaryVlcVideoView;
     
     // Сервисы для перетаскивания панелей
     private readonly Services.PanelDragService _elementSettingsDragService = new();
@@ -213,6 +217,11 @@ public partial class MainWindow : Window
             
             // Инициализация сервисов
             InitializeServices();
+
+            // Привязываем VLC MediaPlayer к VideoView
+            vlcVideoView.MediaPlayer = _vlcVideoService.MainPlayer;
+            vlcVideoView.Visibility = Visibility.Collapsed;
+            _vlcVideoService.Error += (msg) => System.Diagnostics.Debug.WriteLine($"VLC ERROR: {msg}");
             
             // Отладочная информация
             System.Diagnostics.Debug.WriteLine("MainWindow: InitializeComponent completed");
@@ -267,6 +276,11 @@ public partial class MainWindow : Window
                         System.Diagnostics.Debug.WriteLine($"MainWindow.MediaOpened: ОШИБКА - {ex.Message}");
                     }
                 }), System.Windows.Threading.DispatcherPriority.Loaded);
+            };
+
+            this.Closed += (_, _) =>
+            {
+                try { _vlcVideoService.Dispose(); } catch { /* ignore */ }
             };
             
             // Подписываемся на событие окончания воспроизведения для автоперехода
@@ -331,9 +345,9 @@ public partial class MainWindow : Window
     {
         // Настройка TimerService
         _timerService.SetVideoDataProviders(
-            () => mediaElement.Position,
-            () => mediaElement.NaturalDuration.HasTimeSpan ? mediaElement.NaturalDuration.TimeSpan : TimeSpan.Zero,
-            () => mediaElement.Source != null && mediaElement.NaturalDuration.HasTimeSpan
+            () => _vlcVideoService.GetPosition(),
+            () => _vlcVideoService.GetDuration(),
+            () => _vlcVideoService.HasMedia()
         );
         
         _timerService.SetAudioDataProviders(
@@ -361,30 +375,21 @@ public partial class MainWindow : Window
         _timerService.VideoTimerUpdated += (text) => 
         {
             videoTimerText.Text = text;
-            
-            // Синхронизируем позицию со вторым экраном в реальном времени
-            if (_secondaryMediaElement != null && _secondaryMediaElement.Source != null && 
-                mediaElement.Source != null && !_timerService.IsVideoSliderDragging)
+            // Синхронизация VLC со вторым экраном
+            if (_secondaryScreenWindow != null && _secondaryVlcVideoView != null && _vlcVideoService.HasMedia() && !_timerService.IsVideoSliderDragging)
             {
                 try
                 {
-                    // Проверяем, что это тот же файл
-                    if (mediaElement.Source.LocalPath == _secondaryMediaElement.Source.LocalPath)
+                    var currentPos = _vlcVideoService.GetPosition();
+                    var secondaryPos = _vlcVideoService.GetPosition(forSecondary: true);
+                    if (Math.Abs((currentPos - secondaryPos).TotalSeconds) > 0.1)
                     {
-                        var currentPos = mediaElement.Position;
-                        var secondaryPos = _secondaryMediaElement.Position;
-                        
-                        // Синхронизируем только если разница больше 0.1 секунды (чтобы избежать постоянных обновлений)
-                        if (Math.Abs((currentPos - secondaryPos).TotalSeconds) > 0.1)
-                        {
-                            _secondaryMediaElement.Position = currentPos;
-                        }
+                        _vlcVideoService.SetPosition(currentPos, forSecondary: true);
                     }
                 }
                 catch (Exception ex)
                 {
-                    // Игнорируем ошибки синхронизации, чтобы не ломать основной таймер
-                    System.Diagnostics.Debug.WriteLine($"Ошибка синхронизации позиции: {ex.Message}");
+                    System.Diagnostics.Debug.WriteLine($"VLC sync error: {ex.Message}");
                 }
             }
         };
@@ -401,6 +406,18 @@ public partial class MainWindow : Window
         _sliderService.GetAudioSlider = () => audioSlider;
         _sliderService.GetVideoTotalDuration = () => _videoTotalDuration;
         _sliderService.GetAudioTotalDuration = () => _audioTotalDuration;
+
+        // VLC для видео-слайдера
+        _sliderService.IsVlcVideoActive = () => _vlcVideoService.HasMedia();
+        _sliderService.GetVlcVideoTotalDuration = () => _vlcVideoService.GetDuration();
+        _sliderService.SetVlcVideoPosition = (pos) => _vlcVideoService.SetPosition(pos);
+        _sliderService.SetSecondaryVlcVideoPosition = (pos) =>
+        {
+            if (_secondaryScreenWindow != null)
+            {
+                _vlcVideoService.SetPosition(pos, forSecondary: true);
+            }
+        };
         
         // Настройка SlotManager
         _slotManager.GetMediaSlot = (col, row) => _projectManager.GetMediaSlot(col, row);
@@ -429,6 +446,52 @@ public partial class MainWindow : Window
         _mediaPlayerService.GetMediaBorder = () => mediaBorder;
         _mediaPlayerService.GetTextOverlayGrid = () => textOverlayGrid;
         _mediaPlayerService.GetAbsoluteMediaPath = (path) => _projectManager.GetAbsoluteMediaPath(path);
+        
+        // VLC video hooks (видео воспроизводим через LibVLC)
+        _mediaPlayerService.VlcShowMainVideo = () =>
+        {
+            vlcVideoView.Visibility = Visibility.Visible;
+            // legacy MediaElement скрыт в XAML; но на всякий случай:
+            mediaElement.Visibility = Visibility.Collapsed;
+        };
+        _mediaPlayerService.VlcHideMainVideo = () =>
+        {
+            vlcVideoView.Visibility = Visibility.Collapsed;
+        };
+        _mediaPlayerService.VlcLoadMainVideo = (absolutePath) =>
+        {
+            _vlcVideoService.Load(absolutePath, forSecondary: false);
+        };
+        _mediaPlayerService.VlcPlayMainVideo = () => _vlcVideoService.Play(forSecondary: false);
+        _mediaPlayerService.VlcStopMainVideo = () => _vlcVideoService.Stop(forSecondary: false);
+        _mediaPlayerService.VlcSetMainVideoPosition = (pos) => _vlcVideoService.SetPosition(pos, forSecondary: false);
+        _mediaPlayerService.VlcGetMainVideoDuration = () => _vlcVideoService.GetDuration(forSecondary: false);
+        _mediaPlayerService.VlcHasMainVideo = () => _vlcVideoService.HasMedia(forSecondary: false);
+
+        _mediaPlayerService.VlcLoadSecondaryVideo = (absolutePath) =>
+        {
+            if (_secondaryScreenWindow != null && _secondaryVlcVideoView != null)
+            {
+                // Показываем VLC-проигрыватель на втором экране (перекрывает контент, пока играем видео)
+                _secondaryScreenWindow.Content = _secondaryVlcVideoView;
+                _vlcVideoService.Load(absolutePath, forSecondary: true);
+            }
+        };
+        _mediaPlayerService.VlcPlaySecondaryVideo = () =>
+        {
+            if (_secondaryScreenWindow == null || _secondaryVlcVideoView == null) return false;
+            return _vlcVideoService.Play(forSecondary: true);
+        };
+        _mediaPlayerService.VlcStopSecondaryVideo = () =>
+        {
+            if (_secondaryScreenWindow == null || _secondaryVlcVideoView == null) return;
+            _vlcVideoService.Stop(forSecondary: true);
+        };
+        _mediaPlayerService.VlcSetSecondaryVideoPosition = (pos) =>
+        {
+            if (_secondaryScreenWindow == null || _secondaryVlcVideoView == null) return;
+            _vlcVideoService.SetPosition(pos, forSecondary: true);
+        };
         _mediaPlayerService.GetSecondaryMediaElement = () => 
         {
             // Сначала проверяем сервис, потом локальную переменную
@@ -1152,6 +1215,17 @@ public partial class MainWindow : Window
         // Обновляем локальные переменные для обратной совместимости
         _secondaryScreenWindow = _secondaryScreenService.SecondaryScreenWindow;
         _secondaryMediaElement = _secondaryScreenService.SecondaryMediaElement;
+
+        // Подготавливаем VLC VideoView для второго экрана (используем только при VLC-видео)
+        if (_secondaryScreenWindow != null && _secondaryVlcVideoView == null)
+        {
+            _secondaryVlcVideoView = new LibVLCSharp.WPF.VideoView
+            {
+                MediaPlayer = _vlcVideoService.SecondaryPlayer,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch
+            };
+        }
         
         System.Diagnostics.Debug.WriteLine($"CreateSecondaryScreenWindow: Окно создано. Window={_secondaryScreenWindow != null}, MediaElement={_secondaryMediaElement != null}");
     }
@@ -1489,65 +1563,10 @@ public partial class MainWindow : Window
             await _mediaPlayerService.LoadMediaFromSlotSelective(mediaSlot);
             System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: ЗАВЕРШЕНО");
             
-            // КРИТИЧНО: Запускаем видео ПОСЛЕ загрузки, если это видео
-            // Это решает проблему с нулевым размером MediaElement
+            // Видео теперь запускается внутри MediaPlayerService через VLC-хуки
             if (mediaSlot.Type == MediaType.Video)
             {
-                System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: Запускаем видео после загрузки");
-                
-                // Используем BeginInvoke с высоким приоритетом для принудительного обновления layout
-                _ = Dispatcher.BeginInvoke(new Action(() =>
-                {
-                    try
-                    {
-                        // Проверяем, что mediaElement существует и имеет Source
-                        if (mediaElement != null && mediaElement.Source != null)
-                        {
-                            // Убеждаемся, что LoadedBehavior установлен правильно
-                            if (mediaElement.LoadedBehavior != MediaState.Manual)
-                            {
-                                mediaElement.LoadedBehavior = MediaState.Manual;
-                                System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: Исправлен LoadedBehavior на Manual");
-                            }
-                            
-                            // КРИТИЧНО: НЕ трогаем размеры MediaElement!
-                            // XAML правильно настроил все свойства layout, любые изменения нарушают WPF layout system
-                            System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: Проверяем размеры MediaElement - ActualWidth={mediaElement.ActualWidth}, ActualHeight={mediaElement.ActualHeight}");
-                            System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: mediaBorder - ActualWidth={mediaBorder?.ActualWidth}, ActualHeight={mediaBorder?.ActualHeight}");
-                            
-                            // Убеждаемся, что элемент видим и непрозрачен
-                            mediaElement.Visibility = Visibility.Visible;
-                            if (mediaElement.Opacity <= 0)
-                            {
-                                mediaElement.Opacity = 1.0;
-                                System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: Исправлена прозрачность на 1.0");
-                            }
-                            
-                            // Запускаем воспроизведение
-                            System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: Вызываем Play(), Source={mediaElement.Source?.LocalPath}, ActualWidth={mediaElement.ActualWidth}, ActualHeight={mediaElement.ActualHeight}");
-                            mediaElement.Play();
-                            isVideoPlaying = true;
-                            
-                            // Синхронизируем с дополнительным экраном
-                            if (_secondaryMediaElement != null && _secondaryMediaElement.Source != null)
-                            {
-                                _secondaryMediaElement.Play();
-                                System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: Запущено воспроизведение на дополнительном экране");
-                            }
-                            
-                            System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: Play() вызван успешно");
-                        }
-                        else
-                        {
-                            System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: ОШИБКА - mediaElement == null или Source == null");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: ОШИБКА при запуске видео - {ex.Message}");
-                        System.Diagnostics.Debug.WriteLine($"MainWindow.LoadMediaFromSlotSelective: StackTrace - {ex.StackTrace}");
-                    }
-                }), System.Windows.Threading.DispatcherPriority.Loaded);
+                isVideoPlaying = _vlcVideoService.HasMedia() && _vlcVideoService.IsPlaying();
             }
         }
         catch (Exception ex)

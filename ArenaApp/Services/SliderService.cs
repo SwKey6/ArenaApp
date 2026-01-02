@@ -19,6 +19,12 @@ namespace ArenaApp.Services
         public Func<MediaElement>? GetMainMediaElement { get; set; }
         public Func<MediaElement?>? GetSecondaryMediaElement { get; set; }
         public Func<Slider>? GetAudioSlider { get; set; }
+
+        // Поддержка VLC-видео
+        public Func<bool>? IsVlcVideoActive { get; set; }
+        public Func<TimeSpan>? GetVlcVideoTotalDuration { get; set; }
+        public Action<TimeSpan>? SetVlcVideoPosition { get; set; }
+        public Action<TimeSpan>? SetSecondaryVlcVideoPosition { get; set; }
         
         // Делегаты для получения данных
         public Func<TimeSpan>? GetVideoTotalDuration { get; set; }
@@ -56,16 +62,27 @@ namespace ArenaApp.Services
             }
             
             var videoSlider = GetVideoSlider?.Invoke();
+            var isVlc = IsVlcVideoActive?.Invoke() == true;
             var mainMediaElement = GetMainMediaElement?.Invoke();
-            var videoTotalDuration = GetVideoTotalDuration?.Invoke() ?? TimeSpan.Zero;
+            var videoTotalDuration = isVlc
+                ? (GetVlcVideoTotalDuration?.Invoke() ?? TimeSpan.Zero)
+                : (GetVideoTotalDuration?.Invoke() ?? TimeSpan.Zero);
             var secondaryMediaElement = GetSecondaryMediaElement?.Invoke();
             
             // Устанавливаем позицию при отпускании слайдера
-            if (videoTotalDuration.TotalSeconds > 0 && videoSlider != null && mainMediaElement != null)
+            if (videoTotalDuration.TotalSeconds > 0 && videoSlider != null)
             {
                 var newPosition = TimeSpan.FromSeconds((videoSlider.Value / 100.0) * videoTotalDuration.TotalSeconds);
                 
-                if (mainMediaElement.NaturalDuration.HasTimeSpan && mainMediaElement.NaturalDuration.TimeSpan.TotalSeconds > 0)
+                if (isVlc)
+                {
+                    SetVlcVideoPosition?.Invoke(newPosition);
+                    SetSecondaryVlcVideoPosition?.Invoke(newPosition);
+                    System.Diagnostics.Debug.WriteLine($"VLC: Перемотка видео -> {newPosition}");
+                    return;
+                }
+
+                if (mainMediaElement != null && mainMediaElement.NaturalDuration.HasTimeSpan && mainMediaElement.NaturalDuration.TimeSpan.TotalSeconds > 0)
                 {
                     mainMediaElement.Position = newPosition;
                     

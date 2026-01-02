@@ -52,6 +52,21 @@ namespace ArenaApp.Services
         public Func<string, bool>? IsMediaFileAlreadyPlaying { get; set; }
         public Func<string, MediaType, string, bool>? ShouldBlockMediaFile { get; set; }
         public Func<string, string>? GetAbsoluteMediaPath { get; set; }  // Получение абсолютного пути с учетом режима хранения
+
+        // VLC видео (если задано — видео воспроизводим через LibVLC, а не через WPF MediaElement)
+        public Action? VlcShowMainVideo { get; set; }
+        public Action? VlcHideMainVideo { get; set; }
+        public Action<string>? VlcLoadMainVideo { get; set; }          // absolute path
+        public Func<bool>? VlcPlayMainVideo { get; set; }
+        public Action? VlcStopMainVideo { get; set; }
+        public Action<TimeSpan>? VlcSetMainVideoPosition { get; set; }
+        public Func<TimeSpan>? VlcGetMainVideoDuration { get; set; }
+        public Func<bool>? VlcHasMainVideo { get; set; }
+
+        public Action<string>? VlcLoadSecondaryVideo { get; set; }     // absolute path
+        public Func<bool>? VlcPlaySecondaryVideo { get; set; }
+        public Action? VlcStopSecondaryVideo { get; set; }
+        public Action<TimeSpan>? VlcSetSecondaryVideoPosition { get; set; }
         
         // Делегаты для работы с аудио слотами
         public Func<string, MediaElement?>? TryGetAudioSlot { get; set; }
@@ -632,6 +647,56 @@ namespace ArenaApp.Services
             
             // Обновляем подсветку кнопок
             UpdateAllSlotButtonsHighlighting?.Invoke();
+
+            // -------------------------
+            // VLC PATH: воспроизводим видео через LibVLC (без MediaElement)
+            // -------------------------
+            if (VlcLoadMainVideo != null && VlcPlayMainVideo != null)
+            {
+                // Прячем legacy MediaElement
+                try
+                {
+                    mediaElement.Stop();
+                    mediaElement.Source = null;
+                    mediaElement.Visibility = Visibility.Collapsed;
+                }
+                catch { /* ignore */ }
+
+                // Показываем VLC рендер
+                VlcShowMainVideo?.Invoke();
+
+                // Получаем абсолютный путь с учетом режима хранения
+                string absolutePath = GetAbsoluteMediaPath?.Invoke(mediaSlot.MediaPath) ?? mediaSlot.MediaPath;
+                absolutePath = Path.GetFullPath(absolutePath);
+                if (!File.Exists(absolutePath))
+                {
+                    throw new FileNotFoundException($"Файл не найден: {absolutePath}", absolutePath);
+                }
+
+                // Загружаем и запускаем
+                VlcLoadMainVideo(absolutePath);
+                VlcPlayMainVideo();
+
+                // Восстанавливаем позицию слота, если есть
+                var vlcSlotPosition = GetSlotPosition?.Invoke(slotKey) ?? TimeSpan.Zero;
+                if (vlcSlotPosition > TimeSpan.Zero)
+                {
+                    VlcSetMainVideoPosition?.Invoke(vlcSlotPosition);
+                    VlcSetSecondaryVideoPosition?.Invoke(vlcSlotPosition);
+                }
+
+                // Второй экран (если открыт) — пробуем запустить тоже
+                var secondaryWindow = GetSecondaryScreenWindow?.Invoke();
+                if (secondaryWindow != null && VlcLoadSecondaryVideo != null && VlcPlaySecondaryVideo != null)
+                {
+                    VlcLoadSecondaryVideo(absolutePath);
+                    VlcPlaySecondaryVideo();
+                }
+
+                RegisterActiveMediaFile?.Invoke(absolutePath);
+                System.Diagnostics.Debug.WriteLine($"VLC: Видео запущено: {absolutePath}");
+                return;
+            }
             
             // Применяем переход при смене медиа с поддержкой второго экрана
             if (_transitionService != null)
@@ -1248,6 +1313,11 @@ namespace ArenaApp.Services
         {
             SetCurrentVisualContent?.Invoke(slotKey);
             SetCurrentMainMedia?.Invoke(slotKey);
+
+            // Если ранее играло VLC-видео — прячем его при переходе на картинку
+            VlcHideMainVideo?.Invoke();
+            VlcStopMainVideo?.Invoke();
+            VlcStopSecondaryVideo?.Invoke();
             
             // Принудительно применяем общие настройки прозрачности
             var globalSettings = GetGlobalSettings?.Invoke();
@@ -1354,6 +1424,11 @@ namespace ArenaApp.Services
         
         private void LoadAudioFromSlot(MediaSlot mediaSlot, string slotKey)
         {
+            // Если ранее играло VLC-видео — прячем его при переходе на аудио
+            VlcHideMainVideo?.Invoke();
+            VlcStopMainVideo?.Invoke();
+            VlcStopSecondaryVideo?.Invoke();
+
             // Проверяем, играет ли уже это аудио в триггере
             bool audioAlreadyPlayingInTrigger = (IsMediaFileAlreadyPlaying?.Invoke(mediaSlot.MediaPath) ?? false) &&
                                               GetCurrentAudioContent?.Invoke() != null &&
@@ -1449,6 +1524,11 @@ namespace ArenaApp.Services
         private void LoadTextFromSlot(MediaSlot mediaSlot, string slotKey, Border mediaBorder, Grid textOverlayGrid)
         {
             SetCurrentMainMedia?.Invoke(slotKey);
+
+            // Если ранее играло VLC-видео — прячем его при переходе на текст
+            VlcHideMainVideo?.Invoke();
+            VlcStopMainVideo?.Invoke();
+            VlcStopSecondaryVideo?.Invoke();
             
             // Проверяем, есть ли уже текстовый элемент в textOverlayGrid
             var existingTextElement = textOverlayGrid.Children.OfType<TextBlock>().FirstOrDefault();

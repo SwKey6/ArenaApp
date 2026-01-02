@@ -1,6 +1,7 @@
 ﻿<Window x:Class="ArenaApp.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vlc="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:ArenaApp"
@@ -975,14 +976,22 @@
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
                                     
-                                    <!-- Основное медиа (видео/изображение) -->
+                                    <!-- Видео (LibVLC) -->
+                                    <vlc:VideoView x:Name="vlcVideoView"
+                                                   Grid.Row="0" Grid.Column="0"
+                                                   HorizontalAlignment="Stretch"
+                                                   VerticalAlignment="Stretch"
+                                                   Visibility="Collapsed"/>
+                                    
+                                    <!-- Legacy MediaElement (оставляем для аудио/совместимости, видео переведем на VLC) -->
                                     <MediaElement Name="mediaElement" 
-                                                Grid.Row="0" Grid.Column="0"
-                                                LoadedBehavior="Manual" 
-                                                Stretch="Uniform"
-                                                ScrubbingEnabled="True"
-                                                UnloadedBehavior="Close"
-                                                MediaFailed="MediaElement_MediaFailed"/>
+                                                  Grid.Row="0" Grid.Column="0"
+                                                  LoadedBehavior="Manual" 
+                                                  Stretch="Uniform"
+                                                  ScrubbingEnabled="True"
+                                                  UnloadedBehavior="Close"
+                                                  Visibility="Collapsed"
+                                                  MediaFailed="MediaElement_MediaFailed"/>
                                     
                                     <!-- Текстовые блоки поверх медиа -->
                                     <Grid Name="textOverlayGrid" 

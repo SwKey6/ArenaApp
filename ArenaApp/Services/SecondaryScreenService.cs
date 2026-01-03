@@ -109,7 +109,19 @@ namespace ArenaApp.Services
                         Left = 0,
                         Top = 0,
                         // Убеждаемся, что содержимое окна правильно растягивается
-                        SizeToContent = SizeToContent.Manual
+                        SizeToContent = SizeToContent.Manual,
+                        // Убираем все отступы и границы
+                        Padding = new Thickness(0),
+                        BorderThickness = new Thickness(0)
+                    };
+                    
+                    // Создаем Grid как контейнер для правильного растягивания
+                    var contentGrid = new Grid
+                    {
+                        HorizontalAlignment = HorizontalAlignment.Stretch,
+                        VerticalAlignment = VerticalAlignment.Stretch,
+                        Margin = new Thickness(0),
+                        Background = Brushes.Black
                     };
                     
                     // Создаем MediaElement для дополнительного экрана
@@ -121,12 +133,11 @@ namespace ArenaApp.Services
                         HorizontalAlignment = HorizontalAlignment.Stretch,
                         VerticalAlignment = VerticalAlignment.Stretch,
                         Margin = new Thickness(0),
-                        Width = screen.Bounds.Width,
-                        Height = screen.Bounds.Height,
                         Volume = 0 // Отключаем звук на втором экране чтобы избежать дублирования
                     };
                     
-                    _secondaryScreenWindow.Content = _secondaryMediaElement;
+                    contentGrid.Children.Add(_secondaryMediaElement);
+                    _secondaryScreenWindow.Content = contentGrid;
                     
                     // Уведомляем о создании MediaElement
                     SetSecondaryMediaElement?.Invoke(_secondaryMediaElement);
@@ -147,9 +158,7 @@ namespace ArenaApp.Services
                                     VerticalAlignment = VerticalAlignment.Stretch,
                                     HorizontalContentAlignment = HorizontalAlignment.Stretch,
                                     VerticalContentAlignment = VerticalAlignment.Stretch,
-                                    Margin = new Thickness(0),
-                                    Width = screen.Bounds.Width,
-                                    Height = screen.Bounds.Height
+                                    Margin = new Thickness(0)
                                 };
                                 
                                 SetSecondaryVlcVideoView?.Invoke(SecondaryVlcVideoView);
@@ -190,16 +199,19 @@ namespace ArenaApp.Services
                         int targetHeight = screen.Bounds.Height;
                         
                         System.Diagnostics.Debug.WriteLine($"Целевые координаты (screen.Bounds): X={targetX}, Y={targetY}, W={targetWidth}, H={targetHeight}");
+                        System.Diagnostics.Debug.WriteLine($"WorkingArea: X={screen.WorkingArea.X}, Y={screen.WorkingArea.Y}, W={screen.WorkingArea.Width}, H={screen.WorkingArea.Height}");
                         
                         // Используем Win32 API для установки позиции и размера
                         // Это работает корректно независимо от расположения мониторов (включая отрицательные координаты)
                         // ВАЖНО: Используем только Win32 API для позиции, не устанавливаем через WPF Left/Top
+                        // Используем SWP_FRAMECHANGED для обновления границ окна
+                        const uint SWP_FRAMECHANGED = 0x0020;
                         bool result = SetWindowPos(handle, IntPtr.Zero, 
                             targetX, 
                             targetY, 
                             targetWidth, 
                             targetHeight, 
-                            SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+                            SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_FRAMECHANGED);
                         
                         System.Diagnostics.Debug.WriteLine($"Win32 SetWindowPos вызван: X={targetX}, Y={targetY}, W={targetWidth}, H={targetHeight}, Result={result}");
                         
@@ -295,17 +307,7 @@ namespace ArenaApp.Services
                             _secondaryScreenWindow.Width = screen.Bounds.Width;
                             _secondaryScreenWindow.Height = screen.Bounds.Height;
                             
-                            // Обновляем размеры содержимого (MediaElement и VideoView)
-                            if (_secondaryMediaElement != null)
-                            {
-                                _secondaryMediaElement.Width = screen.Bounds.Width;
-                                _secondaryMediaElement.Height = screen.Bounds.Height;
-                            }
-                            if (SecondaryVlcVideoView != null)
-                            {
-                                SecondaryVlcVideoView.Width = screen.Bounds.Width;
-                                SecondaryVlcVideoView.Height = screen.Bounds.Height;
-                            }
+                            // Размеры обновляются автоматически через Grid и Stretch alignment
                             
                             _secondaryScreenWindow.UpdateLayout();
                             
@@ -319,20 +321,7 @@ namespace ArenaApp.Services
                         }), System.Windows.Threading.DispatcherPriority.Loaded);
                     };
                     
-                    // Добавляем обработчик для обновления размеров при изменении размера окна
-                    _secondaryScreenWindow.SizeChanged += (s, e) =>
-                    {
-                        if (_secondaryMediaElement != null)
-                        {
-                            _secondaryMediaElement.Width = e.NewSize.Width;
-                            _secondaryMediaElement.Height = e.NewSize.Height;
-                        }
-                        if (SecondaryVlcVideoView != null)
-                        {
-                            SecondaryVlcVideoView.Width = e.NewSize.Width;
-                            SecondaryVlcVideoView.Height = e.NewSize.Height;
-                        }
-                    };
+                    // Размеры обновляются автоматически через Grid и Stretch alignment
                     
                     // Отладочная информация в консоль вместо MessageBox
                     System.Diagnostics.Debug.WriteLine($"Окно создано на экране {selectedScreenIndex + 1}! Позиция: ({screen.Bounds.X}, {screen.Bounds.Y}), Размер: {screen.Bounds.Width}x{screen.Bounds.Height}");
@@ -456,7 +445,28 @@ namespace ArenaApp.Services
             {
                 if (_secondaryScreenWindow != null && _secondaryMediaElement != null)
                 {
-                    _secondaryScreenWindow.Content = _secondaryMediaElement;
+                    // Если содержимое - Grid, добавляем MediaElement в него
+                    if (_secondaryScreenWindow.Content is Grid contentGrid)
+                    {
+                        if (!contentGrid.Children.Contains(_secondaryMediaElement))
+                        {
+                            contentGrid.Children.Clear();
+                            contentGrid.Children.Add(_secondaryMediaElement);
+                        }
+                    }
+                    else
+                    {
+                        // Создаем Grid если его нет
+                        var grid = new Grid
+                        {
+                            HorizontalAlignment = HorizontalAlignment.Stretch,
+                            VerticalAlignment = VerticalAlignment.Stretch,
+                            Margin = new Thickness(0),
+                            Background = Brushes.Black
+                        };
+                        grid.Children.Add(_secondaryMediaElement);
+                        _secondaryScreenWindow.Content = grid;
+                    }
                 }
             }
             catch (Exception ex)

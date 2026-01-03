@@ -447,14 +447,30 @@ public partial class MainWindow : Window
             if (_secondaryScreenWindow != null && _secondaryVlcVideoView != null)
             {
                 // Убеждаемся, что VideoView правильно растягивается на весь экран
-                _secondaryVlcVideoView.Width = _secondaryScreenWindow.ActualWidth > 0 ? _secondaryScreenWindow.ActualWidth : _secondaryScreenWindow.Width;
-                _secondaryVlcVideoView.Height = _secondaryScreenWindow.ActualHeight > 0 ? _secondaryScreenWindow.ActualHeight : _secondaryScreenWindow.Height;
                 _secondaryVlcVideoView.HorizontalAlignment = HorizontalAlignment.Stretch;
                 _secondaryVlcVideoView.VerticalAlignment = VerticalAlignment.Stretch;
                 _secondaryVlcVideoView.Margin = new Thickness(0);
                 
-                // Показываем VLC-проигрыватель на втором экране (перекрывает контент, пока играем видео)
-                _secondaryScreenWindow.Content = _secondaryVlcVideoView;
+                // Если содержимое - Grid, добавляем VideoView в него
+                if (_secondaryScreenWindow.Content is Grid contentGrid)
+                {
+                    contentGrid.Children.Clear();
+                    contentGrid.Children.Add(_secondaryVlcVideoView);
+                }
+                else
+                {
+                    // Создаем Grid если его нет
+                    var grid = new Grid
+                    {
+                        HorizontalAlignment = HorizontalAlignment.Stretch,
+                        VerticalAlignment = VerticalAlignment.Stretch,
+                        Margin = new Thickness(0),
+                        Background = Brushes.Black
+                    };
+                    grid.Children.Add(_secondaryVlcVideoView);
+                    _secondaryScreenWindow.Content = grid;
+                }
+                
                 _vlcVideoService.Load(absolutePath, forSecondary: true);
             }
         };

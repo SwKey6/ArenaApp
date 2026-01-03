@@ -356,12 +356,12 @@ namespace ArenaApp.Services
                 if (slot.IsTextVisible)
                 {
                     hideTextButton.Content = "👁️ Скрыть текст";
-                    hideTextButton.Background = new SolidColorBrush(Color.FromRgb(244, 67, 54)); // Красный
+                    hideTextButton.Background = new SolidColorBrush(Color.FromRgb(218, 54, 51)); // #DA3633 - DangerBrush
                 }
                 else
                 {
                     hideTextButton.Content = "👁️ Показать текст";
-                    hideTextButton.Background = new SolidColorBrush(Color.FromRgb(76, 175, 80)); // Зеленый
+                    hideTextButton.Background = new SolidColorBrush(Color.FromRgb(35, 134, 54)); // #238636 - SuccessBrush
                 }
             }
             

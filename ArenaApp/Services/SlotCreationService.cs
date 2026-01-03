@@ -52,7 +52,7 @@ namespace ArenaApp.Services
                             Content = "Пусто",
                             MinWidth = 60,
                             MinHeight = 60,
-                            Background = new SolidColorBrush(Color.FromRgb(76, 86, 106)), // #4C566A
+                            Background = new SolidColorBrush(Color.FromRgb(48, 54, 61)), // #30363D - темная граница
                             Foreground = Brushes.White,
                             Margin = new Thickness(3),
                             FontSize = 10,

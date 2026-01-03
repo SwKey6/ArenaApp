@@ -3,7 +3,35 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Ввод текста" Height="200" Width="400"
         WindowStartupLocation="CenterOwner"
-        ResizeMode="NoResize">
+        ResizeMode="NoResize"
+        Background="{StaticResource DarkBackgroundBrush}">
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Opacity" Value="0.9"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
     <Grid Margin="20">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -13,7 +41,9 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         
-        <TextBlock x:Name="TextLabel" Grid.Row="0" Text="Введите текст:" Margin="0,0,0,10" FontSize="14"/>
+        <TextBlock x:Name="TextLabel" Grid.Row="0" Text="Введите текст:" 
+                   Margin="0,0,0,10" FontSize="14" 
+                   Foreground="{StaticResource TextPrimaryBrush}"/>
         
         <TextBox x:Name="TextInputBox" Grid.Row="1" Height="80" TextWrapping="Wrap" 
                  AcceptsReturn="True" VerticalScrollBarVisibility="Auto" 
@@ -22,13 +52,13 @@
         <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Center">
             <Button Name="OkButton" Content="OK" Width="120" Height="35" Margin="0,0,15,0" 
                     Click="OkButton_Click" IsDefault="True"
-                    Background="#4CAF50" Foreground="White" 
-                    BorderBrush="#45A049" BorderThickness="1"
+                    Background="{StaticResource SuccessBrush}" Foreground="White" 
+                    BorderBrush="{StaticResource SuccessBrush}" BorderThickness="1"
                     FontWeight="Bold" FontSize="14"/>
             <Button Name="CancelButton" Content="Отмена" Width="120" Height="35" 
                     Click="CancelButton_Click" IsCancel="True"
-                    Background="#F44336" Foreground="White"
-                    BorderBrush="#D32F2F" BorderThickness="1"
+                    Background="{StaticResource DangerBrush}" Foreground="White"
+                    BorderBrush="{StaticResource DangerBrush}" BorderThickness="1"
                     FontWeight="Bold" FontSize="14"/>
         </StackPanel>
     </Grid>

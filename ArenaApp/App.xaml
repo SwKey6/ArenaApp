@@ -4,6 +4,277 @@
              xmlns:local="clr-namespace:ArenaApp"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
-         <!-- Тут можно хранить стили, цвета и т.д. -->
+        <!-- Темная цветовая схема -->
+        <SolidColorBrush x:Key="DarkBackgroundBrush" Color="#0D1117"/>
+        <SolidColorBrush x:Key="DarkPanelBrush" Color="#161B22"/>
+        <SolidColorBrush x:Key="DarkBorderBrush" Color="#30363D"/>
+        <SolidColorBrush x:Key="DarkHoverBrush" Color="#21262D"/>
+        <SolidColorBrush x:Key="PrimaryAccentBrush" Color="#1F6FEB"/>
+        <SolidColorBrush x:Key="PrimaryAccentHoverBrush" Color="#2C7FE8"/>
+        <SolidColorBrush x:Key="SecondaryAccentBrush" Color="#58A6FF"/>
+        <SolidColorBrush x:Key="TextPrimaryBrush" Color="#E6EDF3"/>
+        <SolidColorBrush x:Key="TextSecondaryBrush" Color="#8B949E"/>
+        <SolidColorBrush x:Key="SuccessBrush" Color="#238636"/>
+        <SolidColorBrush x:Key="DangerBrush" Color="#DA3633"/>
+        <SolidColorBrush x:Key="WarningBrush" Color="#D29922"/>
+        <SolidColorBrush x:Key="TriggerButtonBrush" Color="#F85149"/>
+        <SolidColorBrush x:Key="TriggerButtonHoverBrush" Color="#FF6B6B"/>
+        
+        <!-- Стиль для кнопок меню -->
+        <Style x:Key="MenuButtonStyle" TargetType="Button">
+            <Setter Property="MinWidth" Value="120"/>
+            <Setter Property="MinHeight" Value="40"/>
+            <Setter Property="Margin" Value="8"/>
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Background" Value="{StaticResource PrimaryAccentBrush}"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderBrush" Value="{StaticResource PrimaryAccentHoverBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{StaticResource PrimaryAccentHoverBrush}"/>
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Background" Value="{StaticResource SecondaryAccentBrush}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        
+        <!-- Стиль для кнопок триггеров -->
+        <Style x:Key="TriggerButtonStyle" TargetType="Button">
+            <Setter Property="MinWidth" Value="45"/>
+            <Setter Property="MinHeight" Value="45"/>
+            <Setter Property="Margin" Value="3"/>
+            <Setter Property="FontSize" Value="18"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Background" Value="{StaticResource TriggerButtonBrush}"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderBrush" Value="{StaticResource DangerBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Content" Value="▶"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{StaticResource TriggerButtonHoverBrush}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        
+        <!-- Стиль для контекстного меню -->
+        <Style x:Key="ContextMenuStyle" TargetType="ContextMenu">
+            <Setter Property="Background" Value="{StaticResource DarkPanelBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource DarkBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+        </Style>
+        
+        <!-- Стиль для пунктов контекстного меню -->
+        <Style x:Key="ContextMenuItemStyle" TargetType="MenuItem">
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{StaticResource DarkHoverBrush}"/>
+                </Trigger>
+                <Trigger Property="IsHighlighted" Value="True">
+                    <Setter Property="Background" Value="{StaticResource DarkHoverBrush}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        
+        <!-- Стиль для пункта "Удалить" -->
+        <Style x:Key="DeleteMenuItemStyle" TargetType="MenuItem" BasedOn="{StaticResource ContextMenuItemStyle}">
+            <Setter Property="Foreground" Value="{StaticResource DangerBrush}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        
+        <!-- Стиль для TextBox -->
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="{StaticResource DarkPanelBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource DarkBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="FontSize" Value="13"/>
+        </Style>
+        
+        <!-- DataTemplate для выбранного элемента в ComboBox -->
+        <DataTemplate x:Key="ComboBoxSelectionTemplate">
+            <TextBlock Text="{Binding}" Foreground="{StaticResource TextPrimaryBrush}"/>
+        </DataTemplate>
+        
+        <!-- Стиль для ComboBox -->
+        <Style TargetType="ComboBox">
+            <Setter Property="Background" Value="{StaticResource DarkPanelBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource DarkBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton Name="ToggleButton" 
+                                        Grid.Column="2" 
+                                        Focusable="false"
+                                        IsChecked="{Binding Path=IsDropDownOpen,Mode=TwoWay,RelativeSource={RelativeSource TemplatedParent}}"
+                                        ClickMode="Press"
+                                        Background="Transparent"
+                                        BorderBrush="Transparent">
+                                <Path Name="Arrow" 
+                                      Fill="{StaticResource TextPrimaryBrush}" 
+                                      HorizontalAlignment="Center" 
+                                      VerticalAlignment="Center" 
+                                      Data="M 0 0 L 4 4 L 0 8 Z"/>
+                            </ToggleButton>
+                            <ContentPresenter Name="ContentSite" 
+                                            IsHitTestVisible="False" 
+                                            Content="{TemplateBinding SelectionBoxItem}"
+                                            ContentTemplate="{StaticResource ComboBoxSelectionTemplate}"
+                                            Margin="3,3,23,3"
+                                            VerticalAlignment="Center"
+                                            HorizontalAlignment="Left"/>
+                            <TextBox Name="PART_EditableTextBox"
+                                   Style="{x:Null}"
+                                   HorizontalAlignment="Left"
+                                   VerticalAlignment="Center"
+                                   Margin="3,3,23,3"
+                                   Focusable="True"
+                                   Background="Transparent"
+                                   Foreground="{StaticResource TextPrimaryBrush}"
+                                   BorderThickness="0"
+                                   Visibility="Hidden"
+                                   IsReadOnly="{TemplateBinding IsReadOnly}"/>
+                            <Popup Name="Popup"
+                                 Placement="Bottom"
+                                 IsOpen="{TemplateBinding IsDropDownOpen}"
+                                 AllowsTransparency="True"
+                                 Focusable="False"
+                                 PopupAnimation="Slide">
+                                <Grid Name="DropDown"
+                                      SnapsToDevicePixels="True"
+                                      MinWidth="{TemplateBinding ActualWidth}"
+                                      MaxHeight="{TemplateBinding MaxDropDownHeight}">
+                                    <Border x:Name="DropDownBorder"
+                                          Background="{StaticResource DarkPanelBrush}"
+                                          BorderThickness="1"
+                                          BorderBrush="{StaticResource DarkBorderBrush}">
+                                        <ScrollViewer Margin="4,6,4,6" SnapsToDevicePixels="True">
+                                            <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Contained"/>
+                                        </ScrollViewer>
+                                    </Border>
+                                </Grid>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEditable" Value="true">
+                                <Setter Property="IsHitTestVisible" TargetName="PART_EditableTextBox" Value="true"/>
+                                <Setter Property="Visibility" TargetName="PART_EditableTextBox" Value="Visible"/>
+                                <Setter Property="Visibility" TargetName="ContentSite" Value="Hidden"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        
+        <!-- Стиль для ToggleButton в ComboBox (кнопка открытия списка) -->
+        <Style TargetType="ToggleButton">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        </Style>
+        
+        <!-- Стиль для ComboBoxItem -->
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Background" Value="{StaticResource DarkPanelBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{StaticResource DarkHoverBrush}"/>
+                </Trigger>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="{StaticResource PrimaryAccentBrush}"/>
+                    <Setter Property="Foreground" Value="White"/>
+                </Trigger>
+                <MultiTrigger>
+                    <MultiTrigger.Conditions>
+                        <Condition Property="IsSelected" Value="True"/>
+                        <Condition Property="IsMouseOver" Value="True"/>
+                    </MultiTrigger.Conditions>
+                    <Setter Property="Background" Value="{StaticResource PrimaryAccentHoverBrush}"/>
+                    <Setter Property="Foreground" Value="White"/>
+                </MultiTrigger>
+            </Style.Triggers>
+        </Style>
+        
+        <!-- Стиль для Popup (выпадающий список ComboBox) - Popup не имеет Background, стилизуем через Border внутри -->
+        <!-- Фон выпадающего списка контролируется через стили ComboBoxItem выше -->
+        
+        <!-- Стиль для Slider -->
+        <Style TargetType="Slider">
+            <Setter Property="Foreground" Value="{StaticResource PrimaryAccentBrush}"/>
+        </Style>
+        
+        <!-- Стиль для GroupBox -->
+        <Style TargetType="GroupBox">
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource DarkBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="10"/>
+        </Style>
+        
+        <!-- Стиль для CheckBox -->
+        <Style TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        </Style>
+        
+        <!-- Стиль для RadioButton -->
+        <Style TargetType="RadioButton">
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        </Style>
+        
+        <!-- Стиль для Path (иконки в меню) -->
+        <Style TargetType="Path">
+            <Setter Property="Fill" Value="{StaticResource TextSecondaryBrush}"/>
+            <Setter Property="Stroke" Value="{StaticResource TextSecondaryBrush}"/>
+        </Style>
+        
+        <!-- Стиль для TextBlock внутри ComboBox (для отображения выбранного элемента) -->
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        </Style>
     </Application.Resources>
 </Application>

@@ -9,54 +9,120 @@
         WindowState="Maximized"
         Title="ArenaApp - Медиаплеер" Height="450" Width="800" Closing="Window_Closing">
     <Window.Resources>
-        <!-- Простой стиль для кнопок меню -->
-        <Style x:Key="MenuButtonStyle" TargetType="Button">
-            <Setter Property="MinWidth" Value="120"/>
-            <Setter Property="MinHeight" Value="40"/>
-            <Setter Property="Margin" Value="8"/>
-            <Setter Property="Padding" Value="12,8"/>
-            <Setter Property="FontSize" Value="14"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Background" Value="#2E3440"/>
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="BorderBrush" Value="#4C566A"/>
-            <Setter Property="BorderThickness" Value="2"/>
+        <!-- ====== MENU (верхняя панель File/Edit) ====== -->
+        <Style TargetType="{x:Type Menu}">
+            <Setter Property="Background" Value="{StaticResource DarkPanelBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource DarkBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
         </Style>
-        
-        <!-- Простой стиль для кнопок триггеров -->
-        <Style x:Key="TriggerButtonStyle" TargetType="Button">
-            <Setter Property="MinWidth" Value="45"/>
-            <Setter Property="MinHeight" Value="45"/>
-            <Setter Property="Margin" Value="3"/>
-            <Setter Property="FontSize" Value="18"/>
-            <Setter Property="FontWeight" Value="Bold"/>
-            <Setter Property="Background" Value="#D08770"/>
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="BorderBrush" Value="#BF616A"/>
-            <Setter Property="BorderThickness" Value="2"/>
-            <Setter Property="Content" Value="▶"/>
+
+        <!-- ====== MENUITEM (и верхние, и выпадающие пункты) ====== -->
+        <Style TargetType="{x:Type MenuItem}">
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Padding" Value="10,6"/>
+            <Setter Property="Margin" Value="0"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type MenuItem}">
+                        <Grid>
+                            <!-- Сам пункт -->
+                            <Border x:Name="Bd"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="Transparent"
+                                    BorderThickness="1"
+                                    SnapsToDevicePixels="True">
+                                <Grid Margin="2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <!-- Иконка (если будет) -->
+                                    <ContentPresenter Grid.Column="0"
+                                                      ContentSource="Icon"
+                                                      Margin="0,0,8,0"
+                                                      VerticalAlignment="Center"/>
+
+                                    <!-- Текст -->
+                                    <ContentPresenter Grid.Column="1"
+                                                      ContentSource="Header"
+                                                      RecognizesAccessKey="True"
+                                                      VerticalAlignment="Center"/>
+
+                                    <!-- Стрелка подменю -->
+                                    <Path x:Name="Arrow"
+                                          Grid.Column="2"
+                                          Width="6" Height="10"
+                                          Margin="10,0,0,0"
+                                          VerticalAlignment="Center"
+                                          Fill="{StaticResource TextSecondaryBrush}"
+                                          Data="M 0 0 L 4 5 L 0 10 Z"
+                                          Visibility="Collapsed"/>
+                                </Grid>
+                            </Border>
+
+                            <!-- Выпадающее подменю -->
+                            <Popup x:Name="PART_Popup"
+                                   IsOpen="{TemplateBinding IsSubmenuOpen}"
+                                   Placement="Right"
+                                   AllowsTransparency="True"
+                                   Focusable="False"
+                                   PopupAnimation="Fade">
+                                <Border Background="{StaticResource DarkPanelBrush}"
+                                        BorderBrush="{StaticResource DarkBorderBrush}"
+                                        BorderThickness="1"
+                                        SnapsToDevicePixels="True">
+                                    <ScrollViewer Margin="4"
+                                                  SnapsToDevicePixels="True">
+                                        <StackPanel IsItemsHost="True"
+                                                    KeyboardNavigation.DirectionalNavigation="Cycle"/>
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+
+                        <ControlTemplate.Triggers>
+                            <!-- Если это верхний пункт меню (File/Edit), то подменю открывается вниз -->
+                            <Trigger Property="Role" Value="TopLevelHeader">
+                                <Setter TargetName="PART_Popup" Property="Placement" Value="Bottom"/>
+                                <Setter TargetName="Arrow" Property="Visibility" Value="Collapsed"/>
+                                <Setter Property="Padding" Value="12,6"/>
+                            </Trigger>
+
+                            <!-- Если это пункт с подменю -->
+                            <Trigger Property="Role" Value="SubmenuHeader">
+                                <Setter TargetName="Arrow" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+
+                            <!-- Hover -->
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource DarkHoverBrush}"/>
+                            </Trigger>
+
+                            <!-- Disabled: делаем читабельным на тёмном фоне -->
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+                                <Setter TargetName="Arrow" Property="Fill" Value="{StaticResource TextSecondaryBrush}"/>
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.7"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
-        
-        <!-- Стиль для контекстного меню -->
-        <Style x:Key="ContextMenuStyle" TargetType="ContextMenu">
-            <Setter Property="Background" Value="White"/>
-            <Setter Property="BorderBrush" Value="Gray"/>
-            <Setter Property="BorderThickness" Value="1"/>
-        </Style>
-        
-        <!-- Стиль для пунктов контекстного меню -->
-        <Style x:Key="ContextMenuItemStyle" TargetType="MenuItem">
-            <Setter Property="Padding" Value="10,5"/>
-            <Setter Property="FontSize" Value="12"/>
-        </Style>
-        
-        <!-- Стиль для пункта "Удалить" (красный) -->
-        <Style x:Key="DeleteMenuItemStyle" TargetType="MenuItem" BasedOn="{StaticResource ContextMenuItemStyle}">
-            <Setter Property="Foreground" Value="Red"/>
-            <Setter Property="FontWeight" Value="Bold"/>
+
+        <!-- ====== SEPARATOR в меню ====== -->
+        <Style TargetType="{x:Type Separator}">
+            <Setter Property="Margin" Value="6,4"/>
+            <Setter Property="Background" Value="{StaticResource DarkBorderBrush}"/>
+            <Setter Property="Height" Value="1"/>
         </Style>
     </Window.Resources>
-    <Grid Background="gray">
+    <Grid Background="{StaticResource DarkBackgroundBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
@@ -64,7 +130,7 @@
         </Grid.RowDefinitions>
         
         <!-- Меню File и Edit -->
-        <Menu Grid.Row="0" Background="LightGray">
+        <Menu Grid.Row="0">
             <MenuItem Header="File">
                 <MenuItem Header="New Project" Click="NewProject_Click"/>
                 <MenuItem Header="Open Project" Click="OpenProject_Click"/>
@@ -97,9 +163,9 @@
                         Height="500"
                         Canvas.Left="0"
                         Canvas.Top="0"
-                        Background="#3B4252"
+                        Background="{StaticResource DarkPanelBrush}"
                         CornerRadius="12"
-                        BorderBrush="#4C566A"
+                        BorderBrush="{StaticResource DarkBorderBrush}"
                         BorderThickness="2"
                         MouseLeftButtonDown="ElementSettingsBorder_MouseLeftButtonDown"
                         MouseMove="ElementSettingsBorder_MouseMove"
@@ -121,9 +187,9 @@
                                       Content="◀"
                                       Width="30"
                                       Height="30"
-                                      Background="#5E81AC"
+                                      Background="{StaticResource PrimaryAccentBrush}"
                                       Foreground="White"
-                                      BorderBrush="#81A1C1"
+                                      BorderBrush="{StaticResource PrimaryAccentHoverBrush}"
                                       BorderThickness="1"
                                       Click="PreviousElementButton_Click"
                                       ToolTip="Предыдущий элемент"
@@ -135,7 +201,7 @@
                                          Text="Настройки элемента"
                                          FontSize="18"
                                          FontWeight="Bold"
-                                         Foreground="#ECEFF4"
+                                         Foreground="{StaticResource TextPrimaryBrush}"
                                          VerticalAlignment="Center"
                                          HorizontalAlignment="Center"/>
                                 
@@ -145,9 +211,9 @@
                                       Content="▶"
                                       Width="30"
                                       Height="30"
-                                      Background="#5E81AC"
+                                      Background="{StaticResource PrimaryAccentBrush}"
                                       Foreground="White"
-                                      BorderBrush="#81A1C1"
+                                      BorderBrush="{StaticResource PrimaryAccentHoverBrush}"
                                       BorderThickness="1"
                                       Click="NextElementButton_Click"
                                       ToolTip="Следующий элемент"
@@ -160,9 +226,9 @@
                                   Content="✏️ Переименовать"
                                   Width="120"
                                   Height="30"
-                                  Background="#5E81AC"
+                                  Background="{StaticResource PrimaryAccentBrush}"
                                   Foreground="White"
-                                  BorderBrush="#81A1C1"
+                                  BorderBrush="{StaticResource PrimaryAccentHoverBrush}"
                                   BorderThickness="1"
                                   Click="RenameElementButton_Click"
                                   ToolTip="Переименовать элемент"
@@ -174,7 +240,7 @@
                             <TextBlock x:Name="NoElementSelectedText"
                                      Text="Выберите элемент для настройки"
                                      FontSize="14"
-                                     Foreground="#D8DEE9"
+                                     Foreground="{StaticResource TextSecondaryBrush}"
                                      HorizontalAlignment="Center"
                                      Margin="0,50,0,0"/>
                             
@@ -183,8 +249,8 @@
                                 
                                 <!-- Скорость воспроизведения -->
                                 <GroupBox x:Name="SpeedGroupBox" Header="Скорость воспроизведения" 
-                                        Foreground="#ECEFF4" 
-                                        BorderBrush="#4C566A"
+                                        Foreground="{StaticResource TextPrimaryBrush}" 
+                                        BorderBrush="{StaticResource DarkBorderBrush}"
                                         Margin="0,0,0,15">
                                     <StackPanel>
                                         <!-- Слайдер скорости -->
@@ -209,7 +275,7 @@
                                         </Grid>
                                         <TextBlock x:Name="SpeedValueText"
                                                  Text="Скорость: 1.0x"
-                                                 Foreground="#ECEFF4"
+                                                 Foreground="{StaticResource TextPrimaryBrush}"
                                                  HorizontalAlignment="Center"
                                                  Margin="0,0,0,10"/>
                                         
@@ -227,8 +293,8 @@
                                 
                                 <!-- Управление воспроизведением -->
                                 <GroupBox Header="Управление воспроизведением" 
-                                        Foreground="#ECEFF4" 
-                                        BorderBrush="#4C566A"
+                                        Foreground="{StaticResource TextPrimaryBrush}" 
+                                        BorderBrush="{StaticResource DarkBorderBrush}"
                                         Margin="0,0,0,15">
                                     <WrapPanel HorizontalAlignment="Center" Margin="0,10,0,10">
                                         <Button x:Name="PreviousMediaButton" Content="⏮️" Click="PreviousMediaButton_Click" Style="{StaticResource MenuButtonStyle}" Margin="2" ToolTip="Предыдущее медиа"/>
@@ -240,8 +306,8 @@
                                 
                                 <!-- Прозрачность -->
                                 <GroupBox x:Name="OpacityGroupBox" Header="Прозрачность" 
-                                        Foreground="#ECEFF4" 
-                                        BorderBrush="#4C566A"
+                                        Foreground="{StaticResource TextPrimaryBrush}" 
+                                        BorderBrush="{StaticResource DarkBorderBrush}"
                                         Margin="0,0,0,15">
                                     <StackPanel>
                                         <Grid Margin="0,10,0,10">
@@ -264,15 +330,15 @@
                                         </Grid>
                                         <TextBlock x:Name="OpacityValueText"
                                                  Text="Прозрачность: 100%"
-                                                 Foreground="#ECEFF4"
+                                                 Foreground="{StaticResource TextPrimaryBrush}"
                                                  HorizontalAlignment="Center"/>
                                     </StackPanel>
                                 </GroupBox>
                                 
                                 <!-- Уровень звука -->
                                 <GroupBox x:Name="VolumeGroupBox" Header="Уровень звука" 
-                                        Foreground="#ECEFF4" 
-                                        BorderBrush="#4C566A"
+                                        Foreground="{StaticResource TextPrimaryBrush}" 
+                                        BorderBrush="{StaticResource DarkBorderBrush}"
                                         Margin="0,0,0,15">
                                     <StackPanel>
                                         <Grid Margin="0,10,0,10">
@@ -295,7 +361,7 @@
                                         </Grid>
                                         <TextBlock x:Name="VolumeValueText"
                                                  Text="Звук: 100%"
-                                                 Foreground="#ECEFF4"
+                                                 Foreground="{StaticResource TextPrimaryBrush}"
                                                  HorizontalAlignment="Center"
                                                  Margin="0,0,0,10"/>
                                         
@@ -312,8 +378,8 @@
                                 
                                 <!-- Масштаб -->
                                 <GroupBox Header="Масштаб" 
-                                        Foreground="#ECEFF4" 
-                                        BorderBrush="#4C566A"
+                                        Foreground="{StaticResource TextPrimaryBrush}" 
+                                        BorderBrush="{StaticResource DarkBorderBrush}"
                                         Margin="0,0,0,15">
                                     <StackPanel>
                                         <Grid Margin="0,10,0,10">
@@ -336,7 +402,7 @@
                                         </Grid>
                                         <TextBlock x:Name="ScaleValueText"
                                                  Text="Масштаб: 100%"
-                                                 Foreground="#ECEFF4"
+                                                 Foreground="{StaticResource TextPrimaryBrush}"
                                                  HorizontalAlignment="Center"
                                                  Margin="0,0,0,10"/>
                                         
@@ -354,8 +420,8 @@
                                 
                                 <!-- Поворот -->
                                 <GroupBox Header="Поворот" 
-                                        Foreground="#ECEFF4" 
-                                        BorderBrush="#4C566A"
+                                        Foreground="{StaticResource TextPrimaryBrush}" 
+                                        BorderBrush="{StaticResource DarkBorderBrush}"
                                         Margin="0,0,0,15">
                                     <StackPanel>
                                         <Grid Margin="0,10,0,10">
@@ -378,7 +444,7 @@
                                         </Grid>
                                         <TextBlock x:Name="RotationValueText"
                                                  Text="Поворот: 0°"
-                                                 Foreground="#ECEFF4"
+                                                 Foreground="{StaticResource TextPrimaryBrush}"
                                                  HorizontalAlignment="Center"
                                                  Margin="0,0,0,10"/>
                                         
@@ -396,8 +462,8 @@
                                 
                                 <!-- Настройки текста (только для текстовых блоков) -->
                                 <GroupBox x:Name="TextSettingsGroupBox" Header="Настройки текста" 
-                                        Foreground="#ECEFF4" 
-                                        BorderBrush="#4C566A"
+                                        Foreground="{StaticResource TextPrimaryBrush}" 
+                                        BorderBrush="{StaticResource DarkBorderBrush}"
                                         Margin="0,0,0,15"
                                         Visibility="Collapsed">
                                     <StackPanel>
@@ -406,9 +472,9 @@
                                               Content="👁️ Скрыть текст"
                                               Width="150"
                                               Height="35"
-                                              Background="#F44336"
+                                              Background="{StaticResource DangerBrush}"
                                               Foreground="White"
-                                              BorderBrush="#D32F2F"
+                                              BorderBrush="{StaticResource DangerBrush}"
                                               BorderThickness="1"
                                               Click="HideTextButton_Click"
                                               ToolTip="Скрыть/показать текст на медиаплеере"
@@ -444,7 +510,7 @@
                                                 <ColumnDefinition Width="Auto"/>
                                                 <ColumnDefinition Width="*"/>
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" Text="Шрифт:" Foreground="#D8DEE9" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                            <TextBlock Grid.Column="0" Text="Шрифт:" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="0,0,10,0"/>
                                             <ComboBox x:Name="FontFamilyComboBox"
                                                     Grid.Column="1"
                                                     SelectedIndex="0"
@@ -467,7 +533,7 @@
                                                 <ColumnDefinition Width="*"/>
                                                 <ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" Text="Размер шрифта:" Foreground="#D8DEE9" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                            <TextBlock Grid.Column="0" Text="Размер шрифта:" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="0,0,10,0"/>
                                             <Slider x:Name="FontSizeSlider"
                                                   Grid.Column="1"
                                                   Minimum="12"
@@ -477,7 +543,7 @@
                                                   IsSnapToTickEnabled="True"
                                                   Margin="10,0,10,0"
                                                   ValueChanged="FontSizeSlider_ValueChanged"/>
-                                            <TextBlock x:Name="FontSizeValueText" Grid.Column="2" Text="24px" Foreground="#D8DEE9" VerticalAlignment="Center"/>
+                                            <TextBlock x:Name="FontSizeValueText" Grid.Column="2" Text="24px" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
                                         </Grid>
                                         
                                         <!-- Содержимое текста -->
@@ -486,7 +552,7 @@
                                                 <ColumnDefinition Width="Auto"/>
                                                 <ColumnDefinition Width="*"/>
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" Text="Содержимое:" Foreground="#D8DEE9" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                            <TextBlock Grid.Column="0" Text="Содержимое:" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="0,0,10,0"/>
                                             <TextBox x:Name="TextContentTextBox"
                                                    Grid.Column="1"
                                                    Text=""
@@ -500,7 +566,7 @@
                                         <!-- Ручная настройка положения -->
                                         <CheckBox x:Name="UseManualPositionCheckBox"
                                                 Content="Ручная настройка положения"
-                                                Foreground="#D8DEE9"
+                                                Foreground="{StaticResource TextSecondaryBrush}"
                                                 Margin="0,10,0,10"
                                                 Checked="UseManualPositionCheckBox_Checked"
                                                 Unchecked="UseManualPositionCheckBox_Unchecked"/>
@@ -512,7 +578,7 @@
                                                     <ColumnDefinition Width="Auto"/>
                                                     <ColumnDefinition Width="*"/>
                                                 </Grid.ColumnDefinitions>
-                                                <TextBlock Grid.Column="0" Text="X:" Foreground="#D8DEE9" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                                <TextBlock Grid.Column="0" Text="X:" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="0,0,10,0"/>
                                                 <TextBox x:Name="TextXTextBox"
                                                        Grid.Column="1"
                                                        Text="0"
@@ -523,7 +589,7 @@
                                                     <ColumnDefinition Width="Auto"/>
                                                     <ColumnDefinition Width="*"/>
                                                 </Grid.ColumnDefinitions>
-                                                <TextBlock Grid.Column="0" Text="Y:" Foreground="#D8DEE9" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                                <TextBlock Grid.Column="0" Text="Y:" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="0,0,10,0"/>
                                                 <TextBox x:Name="TextYTextBox"
                                                        Grid.Column="1"
                                                        Text="0"
@@ -541,7 +607,7 @@
                         <!-- Вертикальное растягивание -->
                         <Border Name="ElementSettingsResizeHandleV" 
                                 Height="8" 
-                                Background="#5E81AC" 
+                                Background="{StaticResource PrimaryAccentBrush}" 
                                 Cursor="SizeNS"
                                 VerticalAlignment="Bottom"
                                 Opacity="0.7"
@@ -554,7 +620,7 @@
                         <!-- Горизонтальное растягивание -->
                         <Border Name="ElementSettingsResizeHandleH" 
                                 Width="8" 
-                                Background="#5E81AC" 
+                                Background="{StaticResource PrimaryAccentBrush}" 
                                 Cursor="SizeWE"
                                 HorizontalAlignment="Right"
                                 Opacity="0.7"
@@ -568,7 +634,7 @@
                         <Border Name="ElementSettingsResizeHandleD" 
                                 Width="12" 
                                 Height="12" 
-                                Background="#5E81AC" 
+                                Background="{StaticResource PrimaryAccentBrush}" 
                                 Cursor="SizeNWSE"
                                 HorizontalAlignment="Right"
                                 VerticalAlignment="Bottom"
@@ -587,9 +653,9 @@
                         Height="500"
                         Canvas.Left="420"
                         Canvas.Top="0"
-                        Background="#2E3440"
+                        Background="{StaticResource DarkPanelBrush}"
                         CornerRadius="12"
-                        BorderBrush="#4C566A"
+                        BorderBrush="{StaticResource DarkBorderBrush}"
                         BorderThickness="2"
                         MouseLeftButtonDown="GlobalSettingsBorder_MouseLeftButtonDown"
                         MouseMove="GlobalSettingsBorder_MouseMove"
@@ -601,38 +667,38 @@
                                 <TextBlock Text="Общие настройки проекта"
                                          FontSize="18"
                                          FontWeight="Bold"
-                                         Foreground="#ECEFF4"
+                                         Foreground="{StaticResource TextPrimaryBrush}"
                                          HorizontalAlignment="Center"
                                          Margin="0,0,0,20"/>
                                 
                                 <!-- Режим хранения медиафайлов -->
                                 <GroupBox Header="Режим хранения медиафайлов" 
-                                        Foreground="#ECEFF4" 
-                                        BorderBrush="#4C566A"
+                                        Foreground="{StaticResource TextPrimaryBrush}" 
+                                        BorderBrush="{StaticResource DarkBorderBrush}"
                                         Margin="0,0,0,15">
                                     <StackPanel>
                                         <TextBlock Text="Выберите способ хранения медиафайлов в проекте:"
-                                                 Foreground="#D8DEE9"
+                                                 Foreground="{StaticResource TextSecondaryBrush}"
                                                  TextWrapping="Wrap"
                                                  Margin="0,0,0,10"/>
                                         
                                         <RadioButton x:Name="StorageModePathsRadio"
                                                    Content="Пути к файлам (экономно, но файлы должны оставаться на месте)"
-                                                   Foreground="#D8DEE9"
+                                                   Foreground="{StaticResource TextSecondaryBrush}"
                                                    Margin="0,5,0,5"
                                                    Tag="Paths"
                                                    Checked="StorageModeRadio_Checked"/>
                                         
                                         <RadioButton x:Name="StorageModeEmbeddedRadio"
                                                    Content="Копировать в папку проекта (занимает место, но проект полностью автономен)"
-                                                   Foreground="#D8DEE9"
+                                                   Foreground="{StaticResource TextSecondaryBrush}"
                                                    Margin="0,5,0,5"
                                                    Tag="Embedded"
                                                    Checked="StorageModeRadio_Checked"/>
                                         
                                         <TextBlock x:Name="StorageModeInfoText"
                                                  Text="Текущий режим: Пути к файлам"
-                                                 Foreground="#88C0D0"
+                                                 Foreground="{StaticResource SecondaryAccentBrush}"
                                                  FontSize="11"
                                                  TextWrapping="Wrap"
                                                  Margin="0,10,0,0"/>
@@ -641,13 +707,13 @@
                                 
                                 <!-- Общая громкость -->
                                 <GroupBox Header="Общая громкость" 
-                                        Foreground="#ECEFF4" 
-                                        BorderBrush="#4C566A"
+                                        Foreground="{StaticResource TextPrimaryBrush}" 
+                                        BorderBrush="{StaticResource DarkBorderBrush}"
                                         Margin="0,0,0,15">
                                     <StackPanel>
                                         <CheckBox x:Name="UseGlobalVolumeCheckBox"
                                                 Content="Использовать общую громкость"
-                                                Foreground="#D8DEE9"
+                                                Foreground="{StaticResource TextSecondaryBrush}"
                                                 Margin="0,0,0,10"
                                                 Checked="UseGlobalVolumeCheckBox_Changed"
                                                 Unchecked="UseGlobalVolumeCheckBox_Changed"/>
@@ -672,7 +738,7 @@
                                         </Grid>
                                         <TextBlock x:Name="GlobalVolumeValueText"
                                                  Text="Общая громкость: 100%"
-                                                 Foreground="#ECEFF4"
+                                                 Foreground="{StaticResource TextPrimaryBrush}"
                                                  HorizontalAlignment="Center"
                                                  Margin="0,0,0,10"/>
                                         
@@ -689,13 +755,13 @@
                                 
                                 <!-- Общая прозрачность -->
                                 <GroupBox Header="Общая прозрачность" 
-                                        Foreground="#ECEFF4" 
-                                        BorderBrush="#4C566A"
+                                        Foreground="{StaticResource TextPrimaryBrush}" 
+                                        BorderBrush="{StaticResource DarkBorderBrush}"
                                         Margin="0,0,0,15">
                                     <StackPanel>
                                         <CheckBox x:Name="UseGlobalOpacityCheckBox"
                                                 Content="Использовать общую прозрачность"
-                                                Foreground="#D8DEE9"
+                                                Foreground="{StaticResource TextSecondaryBrush}"
                                                 Margin="0,0,0,10"
                                                 Checked="UseGlobalOpacityCheckBox_Changed"
                                                 Unchecked="UseGlobalOpacityCheckBox_Changed"/>
@@ -720,20 +786,20 @@
                                         </Grid>
                                         <TextBlock x:Name="GlobalOpacityValueText"
                                                  Text="Общая прозрачность: 100%"
-                                                 Foreground="#ECEFF4"
+                                                 Foreground="{StaticResource TextPrimaryBrush}"
                                                  HorizontalAlignment="Center"/>
                                     </StackPanel>
                                 </GroupBox>
                                 
                                 <!-- Общий масштаб -->
                                 <GroupBox Header="Общий масштаб" 
-                                        Foreground="#ECEFF4" 
-                                        BorderBrush="#4C566A"
+                                        Foreground="{StaticResource TextPrimaryBrush}" 
+                                        BorderBrush="{StaticResource DarkBorderBrush}"
                                         Margin="0,0,0,15">
                                     <StackPanel>
                                         <CheckBox x:Name="UseGlobalScaleCheckBox"
                                                 Content="Использовать общий масштаб"
-                                                Foreground="#D8DEE9"
+                                                Foreground="{StaticResource TextSecondaryBrush}"
                                                 Margin="0,0,0,10"
                                                 Checked="UseGlobalScaleCheckBox_Changed"
                                                 Unchecked="UseGlobalScaleCheckBox_Changed"/>
@@ -758,7 +824,7 @@
                                         </Grid>
                                         <TextBlock x:Name="GlobalScaleValueText"
                                                  Text="Общий масштаб: 100%"
-                                                 Foreground="#ECEFF4"
+                                                 Foreground="{StaticResource TextPrimaryBrush}"
                                                  HorizontalAlignment="Center"
                                                  Margin="0,0,0,10"/>
                                         
@@ -776,13 +842,13 @@
                                 
                                 <!-- Общий поворот -->
                                 <GroupBox Header="Общий поворот" 
-                                        Foreground="#ECEFF4" 
-                                        BorderBrush="#4C566A"
+                                        Foreground="{StaticResource TextPrimaryBrush}" 
+                                        BorderBrush="{StaticResource DarkBorderBrush}"
                                         Margin="0,0,0,15">
                                     <StackPanel>
                                         <CheckBox x:Name="UseGlobalRotationCheckBox"
                                                 Content="Использовать общий поворот"
-                                                Foreground="#D8DEE9"
+                                                Foreground="{StaticResource TextSecondaryBrush}"
                                                 Margin="0,0,0,10"
                                                 Checked="UseGlobalRotationCheckBox_Changed"
                                                 Unchecked="UseGlobalRotationCheckBox_Changed"/>
@@ -807,7 +873,7 @@
                                         </Grid>
                                         <TextBlock x:Name="GlobalRotationValueText"
                                                  Text="Общий поворот: 0°"
-                                                 Foreground="#ECEFF4"
+                                                 Foreground="{StaticResource TextPrimaryBrush}"
                                                  HorizontalAlignment="Center"
                                                  Margin="0,0,0,10"/>
                                         
@@ -825,8 +891,8 @@
                                 
                                 <!-- Настройки переходов -->
                                 <GroupBox Header="Переходы между медиа" 
-                                        Foreground="#ECEFF4" 
-                                        BorderBrush="#4C566A"
+                                        Foreground="{StaticResource TextPrimaryBrush}" 
+                                        BorderBrush="{StaticResource DarkBorderBrush}"
                                         Margin="0,0,0,15">
                                     <StackPanel>
                                         <Grid Margin="0,10,0,10">
@@ -834,7 +900,7 @@
                                                 <ColumnDefinition Width="Auto"/>
                                                 <ColumnDefinition Width="*"/>
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" Text="Тип перехода:" Foreground="#D8DEE9" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                            <TextBlock Grid.Column="0" Text="Тип перехода:" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="0,0,10,0"/>
                                             <ComboBox x:Name="TransitionTypeComboBox"
                                                     Grid.Column="1"
                                                     SelectedIndex="0"
@@ -866,27 +932,27 @@
                                         </Grid>
                                         <TextBlock x:Name="TransitionDurationValueText"
                                                  Text="Длительность: 0.5с"
-                                                 Foreground="#ECEFF4"
+                                                 Foreground="{StaticResource TextPrimaryBrush}"
                                                  HorizontalAlignment="Center"/>
                                     </StackPanel>
                                 </GroupBox>
                                 
                                 <!-- Дополнительные настройки -->
                                 <GroupBox Header="Дополнительные настройки" 
-                                        Foreground="#ECEFF4" 
-                                        BorderBrush="#4C566A"
+                                        Foreground="{StaticResource TextPrimaryBrush}" 
+                                        BorderBrush="{StaticResource DarkBorderBrush}"
                                         Margin="0,0,0,15">
                                     <StackPanel>
                                         <CheckBox x:Name="AutoPlayNextCheckBox"
                                                 Content="Автоматическое воспроизведение следующего элемента"
-                                                Foreground="#D8DEE9"
+                                                Foreground="{StaticResource TextSecondaryBrush}"
                                                 Margin="0,0,0,10"
                                                 Checked="AutoPlayNextCheckBox_Changed"
                                                 Unchecked="AutoPlayNextCheckBox_Changed"/>
                                         
                                         <CheckBox x:Name="LoopPlaylistCheckBox"
                                                 Content="Зацикливание плейлиста"
-                                                Foreground="#D8DEE9"
+                                                Foreground="{StaticResource TextSecondaryBrush}"
                                                 Checked="LoopPlaylistCheckBox_Changed"
                                                 Unchecked="LoopPlaylistCheckBox_Changed"/>
                                     </StackPanel>
@@ -899,7 +965,7 @@
                         <!-- Вертикальное растягивание -->
                         <Border Name="GlobalSettingsResizeHandleV" 
                                 Height="8" 
-                                Background="#5E81AC" 
+                                Background="{StaticResource PrimaryAccentBrush}" 
                                 Cursor="SizeNS"
                                 VerticalAlignment="Bottom"
                                 Opacity="0.7"
@@ -912,7 +978,7 @@
                         <!-- Горизонтальное растягивание -->
                         <Border Name="GlobalSettingsResizeHandleH" 
                                 Width="8" 
-                                Background="#5E81AC" 
+                                Background="{StaticResource PrimaryAccentBrush}" 
                                 Cursor="SizeWE"
                                 HorizontalAlignment="Right"
                                 Opacity="0.7"
@@ -926,7 +992,7 @@
                         <Border Name="GlobalSettingsResizeHandleD" 
                                 Width="12" 
                                 Height="12" 
-                                Background="#5E81AC" 
+                                Background="{StaticResource PrimaryAccentBrush}" 
                                 Cursor="SizeNWSE"
                                 HorizontalAlignment="Right"
                                 VerticalAlignment="Bottom"
@@ -947,9 +1013,9 @@
                         Height="500"
                         Canvas.Left="0"
                         Canvas.Top="0"
-                        Background="#2E3440"
+                        Background="{StaticResource DarkPanelBrush}"
                         CornerRadius="12"
-                        BorderBrush="#4C566A"
+                        BorderBrush="{StaticResource DarkBorderBrush}"
                         BorderThickness="2"
                         MouseLeftButtonDown="MediaPlayerBorder_MouseLeftButtonDown"
                         MouseMove="MediaPlayerBorder_MouseMove"
@@ -961,9 +1027,9 @@
                                     VerticalAlignment="Top" 
                                     HorizontalAlignment="Stretch"
                                     Margin="10,10,10,10" 
-                                    Background="#2E3440"
+                                    Background="{StaticResource DarkPanelBrush}"
                                     CornerRadius="12"
-                                    BorderBrush="#4C566A"
+                                    BorderBrush="{StaticResource DarkBorderBrush}"
                                     BorderThickness="2"
                                     ClipToBounds="True">
                                 <Grid ClipToBounds="False"
@@ -1010,7 +1076,7 @@
                                         FontWeight="SemiBold"
                                         HorizontalAlignment="Center"
                                         Text="Видео: 00:00:00.000"
-                                        Foreground="#ECEFF4"
+                                        Foreground="{StaticResource TextPrimaryBrush}"
                                         Margin="0,0,0,8"/>
                                 
                                 <!-- Видео слайдер -->
@@ -1031,7 +1097,7 @@
                                         FontWeight="SemiBold"
                                         HorizontalAlignment="Center"
                                         Text="Аудио: 00:00:00.000"
-                                        Foreground="#ECEFF4"
+                                        Foreground="{StaticResource TextPrimaryBrush}"
                                         Margin="0,0,0,8"/>
                                 
                                 <!-- Аудио слайдер -->
@@ -1052,7 +1118,7 @@
                         <!-- Вертикальное растягивание -->
                         <Border Name="MediaPlayerResizeHandleV" 
                                 Height="8" 
-                                Background="#5E81AC" 
+                                Background="{StaticResource PrimaryAccentBrush}" 
                                 Cursor="SizeNS"
                                 VerticalAlignment="Bottom"
                                 Opacity="0.7"
@@ -1065,7 +1131,7 @@
                         <!-- Горизонтальное растягивание -->
                         <Border Name="MediaPlayerResizeHandleH" 
                                 Width="8" 
-                                Background="#5E81AC" 
+                                Background="{StaticResource PrimaryAccentBrush}" 
                                 Cursor="SizeWE"
                                 HorizontalAlignment="Right"
                                 Opacity="0.7"
@@ -1079,7 +1145,7 @@
                         <Border Name="MediaPlayerResizeHandleD" 
                                 Width="12" 
                                 Height="12" 
-                                Background="#5E81AC" 
+                                Background="{StaticResource PrimaryAccentBrush}" 
                                 Cursor="SizeNWSE"
                                 HorizontalAlignment="Right"
                                 VerticalAlignment="Bottom"
@@ -1109,9 +1175,9 @@
                         Height="300"
                         Canvas.Left="0"
                         Canvas.Bottom="0"
-                        Background="#2E3440"
+                        Background="{StaticResource DarkPanelBrush}"
                         CornerRadius="12"
-                        BorderBrush="#4C566A"
+                        BorderBrush="{StaticResource DarkBorderBrush}"
                         BorderThickness="2"
                         MouseLeftButtonDown="MediaCellsBorder_MouseLeftButtonDown"
                         MouseMove="MediaCellsBorder_MouseMove"
@@ -1123,7 +1189,7 @@
                         <!-- Вертикальное растягивание -->
                         <Border Name="MediaCellsResizeHandleV" 
                                 Height="8" 
-                                Background="#5E81AC" 
+                                Background="{StaticResource PrimaryAccentBrush}" 
                                 Cursor="SizeNS"
                                 VerticalAlignment="Bottom"
                                 Opacity="0.7"
@@ -1136,7 +1202,7 @@
                         <!-- Горизонтальное растягивание -->
                         <Border Name="MediaCellsResizeHandleH" 
                                 Width="8" 
-                                Background="#5E81AC" 
+                                Background="{StaticResource PrimaryAccentBrush}" 
                                 Cursor="SizeWE"
                                 HorizontalAlignment="Right"
                                 Opacity="0.7"
@@ -1150,7 +1216,7 @@
                         <Border Name="MediaCellsResizeHandleD" 
                                 Width="12" 
                                 Height="12" 
-                                Background="#5E81AC" 
+                                Background="{StaticResource PrimaryAccentBrush}" 
                                 Cursor="SizeNWSE"
                                 HorizontalAlignment="Right"
                                 VerticalAlignment="Bottom"

@@ -3,7 +3,41 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Выбор типа контента" Height="200" Width="400"
         WindowStartupLocation="CenterOwner"
-        ResizeMode="NoResize">
+        ResizeMode="NoResize"
+        Background="{StaticResource DarkBackgroundBrush}">
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Background" Value="{StaticResource PrimaryAccentBrush}"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderBrush" Value="{StaticResource PrimaryAccentHoverBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{StaticResource PrimaryAccentHoverBrush}"/>
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Background" Value="{StaticResource SecondaryAccentBrush}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
     <Grid Margin="20">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -12,7 +46,8 @@
         </Grid.RowDefinitions>
         
         <TextBlock Grid.Row="0" Text="Выберите тип контента для слота:" 
-                   FontSize="14" Margin="0,0,0,20" TextAlignment="Center"/>
+                   FontSize="14" Margin="0,0,0,20" TextAlignment="Center"
+                   Foreground="{StaticResource TextPrimaryBrush}"/>
         
         <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Center">
             <Button Name="MediaButton" Content="Медиа" Width="100" Height="35" Margin="0,0,10,0" 
@@ -20,7 +55,9 @@
             <Button Name="TextButton" Content="Текст" Width="100" Height="35" Margin="0,0,10,0" 
                     Click="TextButton_Click"/>
             <Button Name="CancelButton" Content="Отмена" Width="100" Height="35" 
-                    Click="CancelButton_Click" IsCancel="True"/>
+                    Click="CancelButton_Click" IsCancel="True"
+                    Background="{StaticResource DangerBrush}"
+                    BorderBrush="{StaticResource DangerBrush}"/>
         </StackPanel>
     </Grid>
 </Window>

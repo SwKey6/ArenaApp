@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ArenaApp")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+48c772fb92553222df2927967f56e2ef013fb98d")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+282d9f7f39978d6cde1b1f65cdf67eec33531dff")]
 [assembly: System.Reflection.AssemblyProductAttribute("ArenaApp")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ArenaApp")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

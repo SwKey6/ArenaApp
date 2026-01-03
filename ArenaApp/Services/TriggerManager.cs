@@ -18,6 +18,10 @@ namespace ArenaApp.Services
         public Func<int, int, MediaSlot?>? GetMediaSlot { get; set; }
         public Func<string, bool>? ShouldBlockMediaFile { get; set; }
         
+        // Делегаты для проверки состояния медиа
+        public Func<string, bool>? IsMediaFileAlreadyPlaying { get; set; }
+        public Func<MediaType?>? GetCurrentMediaType { get; set; }
+        
         // Делегаты для работы с UI
         public Action<int>? OnTriggerStarted { get; set; }
         public Action<int>? OnTriggerStopped { get; set; }
@@ -172,6 +176,30 @@ namespace ArenaApp.Services
             {
                 _activeTriggerColumn = null;
             }
+        }
+        
+        /// <summary>
+        /// Проверяет, нужно ли блокировать запуск триггера
+        /// </summary>
+        public bool ShouldBlockTrigger(MediaSlot? videoSlot, MediaSlot? audioSlot, MediaSlot? imageSlot)
+        {
+            // Для триггеров не блокируем если аудио уже играет - оно продолжит играть
+            // Блокируем только если пытаемся запустить тот же аудио файл в отдельном слоте
+            
+            // Если есть аудио в триггере и оно уже играет - не блокируем (продолжит играть)
+            if (audioSlot != null && IsMediaFileAlreadyPlaying != null && IsMediaFileAlreadyPlaying(audioSlot.MediaPath))
+            {
+                // Проверяем, играет ли это аудио в триггере или в отдельном слоте
+                var currentAudioType = GetCurrentMediaType?.Invoke();
+                if (currentAudioType == MediaType.Audio)
+                {
+                    // Если аудио играет в триггере - не блокируем
+                    // Если аудио играет в отдельном слоте - блокируем
+                    return false; // Для триггеров всегда разрешаем
+                }
+            }
+            
+            return false;
         }
     }
 }

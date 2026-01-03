@@ -16,6 +16,7 @@ namespace ArenaApp.Services
         public event Action? Playing;
         public event Action? Paused;
         public event Action? Stopped;
+        public event Action? EndReached;
         public event Action<string>? Error;
 
         public VlcVideoService()
@@ -36,6 +37,7 @@ namespace ArenaApp.Services
             player.Playing += (_, _) => Playing?.Invoke();
             player.Paused += (_, _) => Paused?.Invoke();
             player.Stopped += (_, _) => Stopped?.Invoke();
+            player.EndReached += (_, _) => EndReached?.Invoke();
             player.EncounteredError += (_, _) => Error?.Invoke("LibVLC: EncounteredError");
         }
 
@@ -100,6 +102,110 @@ namespace ArenaApp.Services
         {
             var player = forSecondary ? SecondaryPlayer : MainPlayer;
             return player.Media != null;
+        }
+        
+        /// <summary>
+        /// Получает путь к текущему медиа файлу
+        /// </summary>
+        public string? GetMediaPath(bool forSecondary = false)
+        {
+            var player = forSecondary ? SecondaryPlayer : MainPlayer;
+            if (player.Media == null) return null;
+            
+            try
+            {
+                var mrl = player.Media.Mrl;
+                if (string.IsNullOrWhiteSpace(mrl)) return null;
+                
+                // Если это URI (file://), преобразуем в локальный путь
+                if (Uri.TryCreate(mrl, UriKind.Absolute, out var uri))
+                {
+                    if (uri.IsFile)
+                    {
+                        return uri.LocalPath;
+                    }
+                    return mrl; // Если не file://, возвращаем как есть
+                }
+                
+                // Если это уже путь, возвращаем как есть
+                return mrl;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+        
+        /// <summary>
+        /// Перезапускает медиа с начала (для зацикливания)
+        /// </summary>
+        public void Restart(bool forSecondary = false)
+        {
+            var player = forSecondary ? SecondaryPlayer : MainPlayer;
+            if (player.Media == null) return;
+            
+            try
+            {
+                // Получаем путь к текущему медиа
+                var mediaPath = GetMediaPath(forSecondary);
+                if (string.IsNullOrWhiteSpace(mediaPath))
+                {
+                    System.Diagnostics.Debug.WriteLine($"VLC Restart: Не удалось получить путь к медиа");
+                    return;
+                }
+                
+                // Проверяем существование файла (только для локальных путей)
+                if (mediaPath.StartsWith("file://", StringComparison.OrdinalIgnoreCase) || 
+                    (mediaPath.Length > 2 && mediaPath[1] == ':'))
+                {
+                    if (!File.Exists(mediaPath))
+                    {
+                        System.Diagnostics.Debug.WriteLine($"VLC Restart: Файл не найден: {mediaPath}");
+                        return;
+                    }
+                }
+                
+                // Останавливаем
+                player.Stop();
+                
+                // Небольшая задержка для завершения остановки
+                System.Threading.Thread.Sleep(50);
+                
+                // Перезагружаем медиа
+                var media = new Media(LibVlc, new Uri(mediaPath));
+                player.Media = media;
+                
+                // Запускаем с начала
+                player.Play();
+                
+                System.Diagnostics.Debug.WriteLine($"VLC Restart: Медиа перезапущено с начала: {mediaPath}");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"VLC Restart error: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Синхронизирует позицию вторичного плеера с основным
+        /// </summary>
+        public void SyncSecondaryPlayer()
+        {
+            if (!HasMedia() || !HasMedia(forSecondary: true)) return;
+            
+            try
+            {
+                var currentPos = GetPosition();
+                var secondaryPos = GetPosition(forSecondary: true);
+                if (Math.Abs((currentPos - secondaryPos).TotalSeconds) > 0.1)
+                {
+                    SetPosition(currentPos, forSecondary: true);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"VLC sync error: {ex.Message}");
+            }
         }
 
         public void Dispose()

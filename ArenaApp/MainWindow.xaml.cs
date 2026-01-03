@@ -64,6 +64,11 @@ public partial class MainWindow : Window
     private readonly Services.ElementSettingsEventHandlerService _elementSettingsEventHandlerService = new();
     private readonly Services.GlobalSettingsEventHandlerService _globalSettingsEventHandlerService = new();
     private readonly Services.SlotMediaService _slotMediaService = new();
+    private readonly Services.SlotClickHandlerService _slotClickHandlerService = new();
+    private readonly Services.ContextMenuHandlerService _contextMenuHandlerService = new();
+    private readonly Services.StorageModeService _storageModeService = new();
+    private readonly Services.MediaElementErrorHandlerService _mediaElementErrorHandlerService = new();
+    private readonly Services.UISearchService _uiSearchService = new();
     
     // Свойства для обратной совместимости с MediaStateService
     private string? _currentMainMedia
@@ -286,49 +291,30 @@ public partial class MainWindow : Window
             // Подписываемся на событие окончания воспроизведения для автоперехода
             mediaElement.MediaEnded += (s, e) => 
             {
-                // Проверяем, включено ли зацикливание
-                bool shouldLoop = _projectManager?.CurrentProject?.GlobalSettings?.LoopPlaylist == true;
-                
-                if (shouldLoop)
+                // Проверяем, что видео действительно закончилось (позиция близка к концу)
+                if (mediaElement.NaturalDuration.HasTimeSpan)
                 {
-                    // Если зацикливание включено, перезапускаем оба экрана с начала
-                    if (_secondaryScreenWindow != null && _secondaryMediaElement != null && 
-                        _secondaryMediaElement.Source != null &&
-                        _secondaryScreenWindow.Content == _secondaryMediaElement)
+                    var position = mediaElement.Position;
+                    var duration = mediaElement.NaturalDuration.TimeSpan;
+                    // Проверяем, что позиция близка к концу (в пределах 0.5 секунды)
+                    if (Math.Abs((position - duration).TotalSeconds) < 0.5)
                     {
-                        try
-                        {
-                            _secondaryMediaElement.Position = TimeSpan.Zero;
-                            _secondaryMediaElement.Play();
-                            System.Diagnostics.Debug.WriteLine("ВИДЕО ЗАВЕРШЕНО: Перезапуск с начала на обоих экранах (зацикливание)");
-                        }
-                        catch (Exception ex)
-                        {
-                            System.Diagnostics.Debug.WriteLine($"Ошибка при перезапуске второго экрана: {ex.Message}");
-                            // Не крашим приложение, просто логируем ошибку
-                        }
+                        HandleMediaEnded();
                     }
                 }
                 else
                 {
-                    // Если зацикливание выключено, останавливаем второй экран
-                    if (_secondaryScreenWindow != null && _secondaryMediaElement != null && 
-                        _secondaryMediaElement.Source != null &&
-                        _secondaryScreenWindow.Content == _secondaryMediaElement)
-                    {
-                        try
-                        {
-                            _secondaryMediaElement.Stop();
-                            System.Diagnostics.Debug.WriteLine("ВИДЕО ЗАВЕРШЕНО НА ОСНОВНОМ ЭКРАНЕ: Остановлено на втором экране");
-                        }
-                        catch (Exception ex)
-                        {
-                            System.Diagnostics.Debug.WriteLine($"Ошибка при остановке второго экрана: {ex.Message}");
-                            // Не крашим приложение, просто логируем ошибку
-                        }
-                    }
+                    // Если длительность неизвестна, просто обрабатываем событие
+                    HandleMediaEnded();
                 }
-                Dispatcher.Invoke(() => AutoPlayNextElement());
+            };
+            
+            // Подписываемся на события VLC для зацикливания и автоперехода
+            // Используем EndReached для точного определения окончания видео
+            _vlcVideoService.EndReached += () =>
+            {
+                // VLC видео действительно достигло конца
+                HandleMediaEnded();
             };
             
             System.Diagnostics.Debug.WriteLine("MainWindow: Constructor completed successfully");
@@ -378,19 +364,7 @@ public partial class MainWindow : Window
             // Синхронизация VLC со вторым экраном
             if (_secondaryScreenWindow != null && _secondaryVlcVideoView != null && _vlcVideoService.HasMedia() && !_timerService.IsVideoSliderDragging)
             {
-                try
-                {
-                    var currentPos = _vlcVideoService.GetPosition();
-                    var secondaryPos = _vlcVideoService.GetPosition(forSecondary: true);
-                    if (Math.Abs((currentPos - secondaryPos).TotalSeconds) > 0.1)
-                    {
-                        _vlcVideoService.SetPosition(currentPos, forSecondary: true);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"VLC sync error: {ex.Message}");
-                }
+                _vlcVideoService.SyncSecondaryPlayer();
             }
         };
         _timerService.VideoSliderUpdated += (value) => videoSlider.Value = value;
@@ -472,6 +446,13 @@ public partial class MainWindow : Window
         {
             if (_secondaryScreenWindow != null && _secondaryVlcVideoView != null)
             {
+                // Убеждаемся, что VideoView правильно растягивается на весь экран
+                _secondaryVlcVideoView.Width = _secondaryScreenWindow.ActualWidth > 0 ? _secondaryScreenWindow.ActualWidth : _secondaryScreenWindow.Width;
+                _secondaryVlcVideoView.Height = _secondaryScreenWindow.ActualHeight > 0 ? _secondaryScreenWindow.ActualHeight : _secondaryScreenWindow.Height;
+                _secondaryVlcVideoView.HorizontalAlignment = HorizontalAlignment.Stretch;
+                _secondaryVlcVideoView.VerticalAlignment = VerticalAlignment.Stretch;
+                _secondaryVlcVideoView.Margin = new Thickness(0);
+                
                 // Показываем VLC-проигрыватель на втором экране (перекрывает контент, пока играем видео)
                 _secondaryScreenWindow.Content = _secondaryVlcVideoView;
                 _vlcVideoService.Load(absolutePath, forSecondary: true);
@@ -666,154 +647,27 @@ public partial class MainWindow : Window
         _contextMenuService.GetActiveTriggerColumn = () => _activeTriggerColumn;
         _contextMenuService.OnRestartItemClick = (tag) => 
         {
-            // Вызываем логику напрямую с тегом
-            if (tag.StartsWith("Slot_"))
-            {
-                var parts = tag.Split('_');
-                if (parts.Length >= 3 && int.TryParse(parts[1], out int column) && int.TryParse(parts[2], out int row))
-                {
-                    var slot = _projectManager.CurrentProject.MediaSlots.FirstOrDefault(s => s.Column == column && s.Row == row);
-                    if (slot != null)
-                    {
-                        var slotKey = $"Slot_{column}_{row}";
-                        bool isMainMedia = _currentMainMedia == slotKey;
-                        bool isAudioMedia = _currentAudioContent == slotKey && _activeAudioSlots.ContainsKey(slotKey);
-                        
-                        if (isMainMedia || isAudioMedia)
-                        {
-                            if (isMainMedia)
-                            {
-                                mediaElement.Stop();
-                                mediaElement.Position = TimeSpan.Zero;
-                                _isVideoPaused = false;
-                                
-                                if (_secondaryMediaElement != null && _secondaryMediaElement.Source != null &&
-                                    mediaElement.Source != null &&
-                                    mediaElement.Source.LocalPath == _secondaryMediaElement.Source.LocalPath)
-                                {
-                                    try
-                                    {
-                                        _secondaryMediaElement.Stop();
-                                        _secondaryMediaElement.Position = TimeSpan.Zero;
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        System.Diagnostics.Debug.WriteLine($"Ошибка при перезапуске на втором экране: {ex.Message}");
-                                    }
-                                }
-                                
-                                mediaElement.Play();
-                                
-                                if (_secondaryMediaElement != null && _secondaryMediaElement.Source != null)
-                                {
-                                    try
-                                    {
-                                        _secondaryMediaElement.Play();
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        System.Diagnostics.Debug.WriteLine($"Ошибка при запуске на втором экране: {ex.Message}");
-                                    }
-                                }
-                            }
-                            
-                            if (isAudioMedia && _activeAudioSlots.TryGetValue(slotKey, out var audioElement) && audioElement != null)
-                            {
-                                audioElement.Stop();
-                                audioElement.Position = TimeSpan.Zero;
-                                audioElement.Play();
-                            }
-                            
-                            UpdateAllSlotButtonsHighlighting();
-                        }
-                        else
-                        {
-                            LoadMediaFromSlotSelective(slot);
-                        }
-                    }
-                }
-            }
+            // Создаем фиктивный MenuItem для вызова обработчика
+            var menuItem = new MenuItem { Tag = tag };
+            _contextMenuHandlerService.HandleRestartItemClick(menuItem, new RoutedEventArgs());
         };
         _contextMenuService.OnPauseItemClick = (tag) => 
         {
-            if (tag.StartsWith("Slot_"))
-            {
-                var parts = tag.Split('_');
-                if (parts.Length >= 3 && int.TryParse(parts[1], out int column) && int.TryParse(parts[2], out int row))
-                {
-                    var slotKey = $"Slot_{column}_{row}";
-                    
-                    if (_currentMainMedia == slotKey)
-                    {
-                        if (_isVideoPaused)
-                        {
-                            mediaElement.Play();
-                            _isVideoPaused = false;
-                            SyncPlayWithSecondaryScreen();
-                        }
-                        else
-                        {
-                            SaveSlotPosition(slotKey, mediaElement.Position);
-                            mediaElement.Pause();
-                            _isVideoPaused = true;
-                            SyncPauseWithSecondaryScreen();
-                        }
-                        UpdateAllSlotButtonsHighlighting();
-                    }
-                    else if (_currentAudioContent == slotKey && _activeAudioSlots.TryGetValue(slotKey, out var audioElement))
-                    {
-                        if (_audioPausedStates.ContainsKey(slotKey) && _audioPausedStates[slotKey])
-                        {
-                            audioElement.Play();
-                            _audioPausedStates[slotKey] = false;
-                        }
-                        else
-                        {
-                            SaveSlotPosition(slotKey, audioElement.Position);
-                            audioElement.Pause();
-                            _audioPausedStates[slotKey] = true;
-                        }
-                        UpdateAllSlotButtonsHighlighting();
-                    }
-                }
-            }
+            // Создаем фиктивный MenuItem для вызова обработчика
+            var menuItem = new MenuItem { Tag = tag };
+            _contextMenuHandlerService.HandlePauseItemClick(menuItem, new RoutedEventArgs());
         };
         _contextMenuService.OnSettingsItemClick = (tag) => 
         {
-            if (tag.StartsWith("Slot_"))
-            {
-                var parts = tag.Split('_');
-                if (parts.Length >= 3 && int.TryParse(parts[1], out int column) && int.TryParse(parts[2], out int row))
-                {
-                    var slot = _projectManager.CurrentProject.MediaSlots.FirstOrDefault(s => s.Column == column && s.Row == row);
-                    if (slot != null)
-                    {
-                        SelectElementForSettings(slot, tag);
-                    }
-                }
-            }
+            // Создаем фиктивный MenuItem для вызова обработчика
+            var menuItem = new MenuItem { Tag = tag };
+            _contextMenuHandlerService.HandleSettingsItemClick(menuItem, new RoutedEventArgs());
         };
         _contextMenuService.OnDeleteItemClick = (tag) => 
         {
-            var result = MessageBox.Show("Вы уверены, что хотите удалить этот элемент?", "Подтверждение удаления",
-                MessageBoxButton.YesNo, MessageBoxImage.Question);
-            
-            if (result == MessageBoxResult.Yes)
-            {
-                if (tag.StartsWith("Slot_"))
-                {
-                    var parts = tag.Split('_');
-                    if (parts.Length >= 3 && int.TryParse(parts[1], out int column) && int.TryParse(parts[2], out int row))
-                    {
-                        var slot = _projectManager.CurrentProject.MediaSlots.FirstOrDefault(s => s.Column == column && s.Row == row);
-                        if (slot != null)
-                        {
-                            _projectManager.CurrentProject.MediaSlots.Remove(slot);
-                            UpdateSlotButton(column, row, "", MediaType.Video);
-                        }
-                    }
-                }
-            }
+            // Создаем фиктивный MenuItem для вызова обработчика
+            var menuItem = new MenuItem { Tag = tag };
+            _contextMenuHandlerService.HandleDeleteItemClick(menuItem, new RoutedEventArgs());
         };
         
         // Обновляем SlotManager для использования SlotUIService
@@ -849,6 +703,11 @@ public partial class MainWindow : Window
         {
             _secondaryMediaElement = element;
             System.Diagnostics.Debug.WriteLine($"SetSecondaryMediaElement: Установлен MediaElement для второго экрана");
+        };
+        _secondaryScreenService.GetVlcSecondaryPlayer = () => _vlcVideoService.SecondaryPlayer;
+        _secondaryScreenService.SetSecondaryVlcVideoView = (view) => 
+        {
+            _secondaryVlcVideoView = view;
         };
         // GetSecondaryScreenWindow не используется в сервисе, так как сервис хранит окно сам
         
@@ -1072,6 +931,9 @@ public partial class MainWindow : Window
         _projectManagementService.SavePanelPositions = () => SavePanelPositions();
         _projectManagementService.CloseSecondaryScreenWindow = () => CloseSecondaryScreenWindow();
         _projectManagementService.ShowMessage = (message, title) => MessageBox.Show(message, title);
+        _projectManagementService.UpdateStorageModeControlsAvailability = () => _storageModeService.UpdateStorageModeControlsAvailability();
+        _projectManagementService.SaveSelectedStorageModeToProject = () => _storageModeService.SaveSelectedStorageModeToProject();
+        _projectManagementService.ApplyStorageModeFromProject = () => _storageModeService.ApplyStorageModeFromProject();
         
         // Настройка MenuService
         _menuService.SetDeviceManager(_deviceManager);
@@ -1145,6 +1007,64 @@ public partial class MainWindow : Window
         _elementSettingsEventHandlerService.PlayElement = (slot, key) => _elementControlService.PlayElement(slot, key);
         _elementSettingsEventHandlerService.StopElement = (slot, key) => _elementControlService.StopElement(slot, key);
         _elementSettingsEventHandlerService.RestartElement = async (slot, key) => await _elementControlService.RestartElement(slot, key);
+        
+        // Настройка SlotClickHandlerService
+        _slotClickHandlerService.SetProjectManager(_projectManager);
+        _slotClickHandlerService.SetMediaStateService(_mediaStateService);
+        _slotClickHandlerService.SetVideoDisplayService(_videoDisplayService);
+        _slotClickHandlerService.SetMediaControlService(_mediaControlService);
+        _slotClickHandlerService.SetDialogService(_dialogService);
+        _slotClickHandlerService.GetMainMediaElement = () => mediaElement;
+        _slotClickHandlerService.GetMediaBorder = () => mediaBorder;
+        _slotClickHandlerService.GetTextOverlayGrid = () => textOverlayGrid;
+        _slotClickHandlerService.GetSecondaryScreenWindow = () => _secondaryScreenService.SecondaryScreenWindow ?? _secondaryScreenWindow;
+        _slotClickHandlerService.GetCurrentMainMedia = () => _currentMainMedia;
+        _slotClickHandlerService.SetCurrentMainMedia = (value) => _currentMainMedia = value;
+        _slotClickHandlerService.GetCurrentVisualContent = () => _currentVisualContent;
+        _slotClickHandlerService.GetCurrentAudioContent = () => _currentAudioContent;
+        _slotClickHandlerService.GetIsVideoPaused = () => _isVideoPaused;
+        _slotClickHandlerService.SetIsVideoPaused = (value) => _isVideoPaused = value;
+        _slotClickHandlerService.GetAllAudioSlots = () => _activeAudioSlots;
+        _slotClickHandlerService.LoadMediaFromSlotSelective = (slot) => LoadMediaFromSlotSelective(slot);
+        _slotClickHandlerService.ShowSlotOptionsDialog = (col, row) => ShowSlotOptionsDialog(col, row);
+        _slotClickHandlerService.UpdateAllSlotButtonsHighlighting = () => UpdateAllSlotButtonsHighlighting();
+        _slotClickHandlerService.SyncPlayWithSecondaryScreen = () => SyncPlayWithSecondaryScreen();
+        _slotClickHandlerService.SyncPauseWithSecondaryScreen = () => SyncPauseWithSecondaryScreen();
+        _slotClickHandlerService.RestoreMediaElement = (element) => RestoreMediaElement(element);
+        
+        // Настройка ContextMenuHandlerService
+        _contextMenuHandlerService.SetProjectManager(_projectManager);
+        _contextMenuHandlerService.SetMediaStateService(_mediaStateService);
+        _contextMenuHandlerService.GetMainMediaElement = () => mediaElement;
+        _contextMenuHandlerService.GetSecondaryMediaElement = () => _secondaryScreenService.SecondaryMediaElement ?? _secondaryMediaElement;
+        _contextMenuHandlerService.GetAllAudioSlots = () => _activeAudioSlots;
+        _contextMenuHandlerService.GetCurrentMainMedia = () => _currentMainMedia;
+        _contextMenuHandlerService.GetCurrentAudioContent = () => _currentAudioContent;
+        _contextMenuHandlerService.GetIsVideoPaused = () => _isVideoPaused;
+        _contextMenuHandlerService.SetIsVideoPaused = (value) => _isVideoPaused = value;
+        _contextMenuHandlerService.HandleSlotClick = (sender, e) => Slot_Click(sender, e);
+        _contextMenuHandlerService.SelectElementForSettings = (slot, key) => SelectElementForSettings(slot, key);
+        _contextMenuHandlerService.UpdateSlotButton = (col, row, path, type) => UpdateSlotButton(col, row, path, type);
+        _contextMenuHandlerService.UpdateAllSlotButtonsHighlighting = () => UpdateAllSlotButtonsHighlighting();
+        _contextMenuHandlerService.FindButtonByTag = (tag) => FindButtonByTag(tag);
+        
+        // Настройка UISearchService
+        _uiSearchService.GetMediaBorder = () => mediaBorder;
+        _uiSearchService.GetBottomPanel = () => BottomPanel;
+        
+        // Настройка TriggerManager для ShouldBlockTrigger
+        _triggerManager.IsMediaFileAlreadyPlaying = (path) => IsMediaFileAlreadyPlaying(path);
+        _triggerManager.GetCurrentMediaType = () => GetCurrentMediaType();
+        
+        // Настройка StorageModeService
+        _storageModeService.SetProjectManager(_projectManager);
+        _storageModeService.GetStorageModePathsRadio = () => StorageModePathsRadio;
+        _storageModeService.GetStorageModeEmbeddedRadio = () => StorageModeEmbeddedRadio;
+        _storageModeService.GetStorageModeInfoText = () => StorageModeInfoText;
+        _storageModeService.GetIsStorageModeUiInitializing = () => _isStorageModeUiInitializing;
+        _storageModeService.SetIsStorageModeUiInitializing = (value) => _isStorageModeUiInitializing = value;
+        
+        // Настройка MediaElementErrorHandlerService (не требует настройки)
     }
     
     // Инициализация меню экранов
@@ -1162,30 +1082,7 @@ public partial class MainWindow : Window
     // Получение списка устройств вывода звука
     private List<string> GetAudioOutputDevices()
     {
-        var devices = new List<string>();
-        
-        try
-        {
-            // Используем NAudio для получения реальных устройств звука
-            var deviceEnumerator = new MMDeviceEnumerator();
-            var devicesCollection = deviceEnumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
-            
-            foreach (var device in devicesCollection)
-            {
-                devices.Add(device.FriendlyName);
-                device.Dispose();
-            }
-            
-            deviceEnumerator.Dispose();
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"Ошибка при получении устройств звука: {ex.Message}");
-            // Fallback - добавляем стандартное устройство
-            devices.Add("Устройство по умолчанию");
-        }
-        
-        return devices;
+        return _deviceManager.GetAudioOutputDevices();
     }
     
     // Диалог выбора экрана
@@ -1215,17 +1112,7 @@ public partial class MainWindow : Window
         // Обновляем локальные переменные для обратной совместимости
         _secondaryScreenWindow = _secondaryScreenService.SecondaryScreenWindow;
         _secondaryMediaElement = _secondaryScreenService.SecondaryMediaElement;
-
-        // Подготавливаем VLC VideoView для второго экрана (используем только при VLC-видео)
-        if (_secondaryScreenWindow != null && _secondaryVlcVideoView == null)
-        {
-            _secondaryVlcVideoView = new LibVLCSharp.WPF.VideoView
-            {
-                MediaPlayer = _vlcVideoService.SecondaryPlayer,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                VerticalAlignment = VerticalAlignment.Stretch
-            };
-        }
+        _secondaryVlcVideoView = _secondaryScreenService.SecondaryVlcVideoView;
         
         System.Diagnostics.Debug.WriteLine($"CreateSecondaryScreenWindow: Окно создано. Window={_secondaryScreenWindow != null}, MediaElement={_secondaryMediaElement != null}");
     }
@@ -1241,22 +1128,7 @@ public partial class MainWindow : Window
     // Настройка аудиоустройства
     private void ConfigureAudioDevice()
     {
-        try
-        {
-            if (!_useSelectedAudio) return;
-            
-            var audioDevices = GetAudioOutputDevices();
-            if (_selectedAudioDeviceIndex >= 0 && _selectedAudioDeviceIndex < audioDevices.Count)
-            {
-                // Здесь можно добавить логику для настройки конкретного аудиоустройства
-                // Пока что просто выводим информацию
-                System.Diagnostics.Debug.WriteLine($"Выбрано аудиоустройство: {audioDevices[_selectedAudioDeviceIndex]}");
-            }
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"Ошибка при настройке аудиоустройства: {ex.Message}");
-        }
+        _deviceManager.ConfigureAudioDevice();
     }
 
     public bool isVideoPlaying = false;
@@ -1334,193 +1206,7 @@ public partial class MainWindow : Window
 
     private void Slot_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button btn)
-        {
-            string? tag = btn.Tag?.ToString();
-            if (string.IsNullOrEmpty(tag)) return;
-
-            // Парсим тег для получения координат слота
-            string[] parts = tag.Replace("Slot_", "").Split('_');
-            if (parts.Length == 2 && 
-                int.TryParse(parts[0], out int column) && 
-                int.TryParse(parts[1], out int row))
-            {
-                // Проверяем, есть ли медиа в этом слоте
-                var mediaSlot = _projectManager.GetMediaSlot(column, row);
-                if (mediaSlot != null && (!string.IsNullOrEmpty(mediaSlot.MediaPath) || mediaSlot.Type == MediaType.Text))
-                {
-                    string slotKey = $"Slot_{column}_{row}";
-                    
-                    // Проверяем, воспроизводится ли этот слот сейчас
-                    bool isMainMedia = false;
-                    
-                    if (mediaSlot.Type == MediaType.Text)
-                    {
-                        // Для текста проверяем наличие текста в textOverlayGrid и совпадение _currentMainMedia
-                        isMainMedia = _currentMainMedia == slotKey && textOverlayGrid.Children.Count > 0;
-                    }
-                    else if (mediaSlot.Type == MediaType.Image)
-                    {
-                        // Для изображений проверяем наличие Image в mediaBorder
-                        // Проверяем как по _currentMainMedia, так и по наличию изображения и пути
-                        bool hasImage = false;
-                        bool imagePathMatches = false;
-                        
-                        if (mediaBorder.Child is Grid mainGrid)
-                        {
-                            var images = mainGrid.Children.OfType<Image>().ToList();
-                            hasImage = images.Any();
-                            // Проверяем, совпадает ли путь изображения с путем слота
-                            if (hasImage && !string.IsNullOrEmpty(mediaSlot.MediaPath))
-                            {
-                                imagePathMatches = images.Any(img => 
-                                    img.Source is BitmapImage bitmap && 
-                                    bitmap.UriSource != null && 
-                                    bitmap.UriSource.LocalPath.Equals(mediaSlot.MediaPath, StringComparison.OrdinalIgnoreCase));
-                            }
-                        }
-                        else if (mediaBorder.Child is Image currentImage)
-                        {
-                            hasImage = true;
-                            // Проверяем путь изображения
-                            if (!string.IsNullOrEmpty(mediaSlot.MediaPath) && currentImage.Source is BitmapImage bitmap)
-                            {
-                                imagePathMatches = bitmap.UriSource != null && 
-                                    bitmap.UriSource.LocalPath.Equals(mediaSlot.MediaPath, StringComparison.OrdinalIgnoreCase);
-                            }
-                        }
-                        
-                        // Если изображение отображается И это тот же слот (по _currentMainMedia, _currentVisualContent или по пути)
-                        isMainMedia = hasImage && (_currentMainMedia == slotKey || _currentVisualContent == slotKey || imagePathMatches);
-                    }
-                    else
-                    {
-                        // Для видео проверяем Source и _currentMainMedia
-                        isMainMedia = _currentMainMedia == slotKey && mediaElement.Source != null;
-                    }
-                    
-                    bool isAudioMedia = _currentAudioContent == slotKey && _activeAudioSlots.ContainsKey(slotKey);
-                    
-                    if (isMainMedia || isAudioMedia)
-                    {
-                        // Если этот слот уже воспроизводится - ставим на паузу/возобновляем или останавливаем
-                        if (isMainMedia)
-                        {
-                            // Для изображений и текста - останавливаем (гасим) при повторном клике
-                            if (mediaSlot.Type == MediaType.Image)
-                            {
-                                // Останавливаем изображение - очищаем визуальный контент
-                                mediaElement.Stop();
-                                mediaElement.Source = null;
-                                _currentMainMedia = null;
-                                
-                                // Восстанавливаем MediaElement если был заменен на Image
-                                if (mediaBorder.Child != mediaElement)
-                                {
-                                    RestoreMediaElement(mediaElement);
-                                    mediaElement.Visibility = Visibility.Visible;
-                                }
-                                
-                                // Очищаем изображение на втором экране
-                                if (_secondaryScreenWindow?.Content is Image)
-                                {
-                                    _secondaryScreenWindow.Content = null;
-                                }
-                                else if (_secondaryScreenWindow?.Content is Grid secondaryGrid)
-                                {
-                                    var secondaryImages = secondaryGrid.Children.OfType<Image>().ToList();
-                                    foreach (var img in secondaryImages)
-                                    {
-                                        secondaryGrid.Children.Remove(img);
-                                    }
-                                }
-                                
-                                // Обновляем подсветку кнопок
-                                UpdateAllSlotButtonsHighlighting();
-                                return;
-                            }
-                            
-                            if (mediaSlot.Type == MediaType.Text)
-                            {
-                                // Останавливаем текст - очищаем textOverlayGrid
-                                textOverlayGrid.Children.Clear();
-                                textOverlayGrid.Visibility = Visibility.Hidden;
-                                _currentMainMedia = null;
-                                
-                                // Очищаем текст на втором экране, если он там есть
-                                if (_secondaryScreenWindow?.Content is Grid secondaryGrid)
-                                {
-                                    var secondaryTextBlocks = secondaryGrid.Children.OfType<TextBlock>().ToList();
-                                    foreach (var textBlock in secondaryTextBlocks)
-                                    {
-                                        secondaryGrid.Children.Remove(textBlock);
-                                    }
-                                }
-                                
-                                // Обновляем подсветку кнопок
-                                UpdateAllSlotButtonsHighlighting();
-                                return;
-                            }
-                            
-                            // Для видео - управляем паузой/возобновлением
-                            if (_isVideoPaused)
-                            {
-                                // Видео на паузе - возобновляем
-                                mediaElement.Play();
-                                SyncPlayWithSecondaryScreen();
-                                _isVideoPaused = false;
-                                
-                            }
-                            else
-                            {
-                                // Видео воспроизводится - ставим на паузу
-                                mediaElement.Pause();
-                                SyncPauseWithSecondaryScreen();
-                                _isVideoPaused = true;
-                                
-                            }
-                        }
-                        
-                        if (isAudioMedia)
-                        {
-                            // Управляем аудио - безопасно получаем элемент
-                            if (_mediaStateService.TryGetAudioSlot(slotKey, out var audioElement) && audioElement != null)
-                            {
-                                bool isAudioPaused = _mediaStateService.IsAudioPaused(slotKey);
-                                
-                                if (isAudioPaused)
-                                {
-                                    // Аудио на паузе - возобновляем
-                                    audioElement.Play();
-                                    _mediaStateService.SetAudioPaused(slotKey, false);
-                                }
-                                else
-                                {
-                                    // Аудио воспроизводится - ставим на паузу
-                                    audioElement.Pause();
-                                    _mediaStateService.SetAudioPaused(slotKey, true);
-                                }
-                            }
-                            else
-                            {
-                                System.Diagnostics.Debug.WriteLine($"ОШИБКА: Аудио элемент не найден для слота {slotKey} в Slot_Click");
-                            }
-                        }
-                    }
-                    else
-                    {
-                        // Если этот слот не воспроизводится - запускаем его
-                        System.Diagnostics.Debug.WriteLine($"Slot_Click: Запускаем слот {column}-{row}, Type={mediaSlot.Type}, Path={mediaSlot.MediaPath}");
-                        LoadMediaFromSlotSelective(mediaSlot);
-                    }
-                }
-                else
-                {
-                    // Предлагаем загрузить медиа или создать текстовый блок в этот слот
-                    ShowSlotOptionsDialog(column, row);
-                }
-            }
-        }
+        _slotClickHandlerService.HandleSlotClick(sender, e);
     }
 
     /// <summary>
@@ -1666,23 +1352,7 @@ public partial class MainWindow : Window
     /// </summary>
     private bool ShouldBlockTrigger(MediaSlot? videoSlot, MediaSlot? audioSlot, MediaSlot? imageSlot)
     {
-        // Для триггеров не блокируем если аудио уже играет - оно продолжит играть
-        // Блокируем только если пытаемся запустить тот же аудио файл в отдельном слоте
-        
-        // Если есть аудио в триггере и оно уже играет - не блокируем (продолжит играть)
-        if (audioSlot != null && IsMediaFileAlreadyPlaying(audioSlot.MediaPath))
-        {
-            // Проверяем, играет ли это аудио в триггере или в отдельном слоте
-            var currentAudioType = GetCurrentMediaType();
-            if (currentAudioType == MediaType.Audio)
-            {
-                // Если аудио играет в триггере - не блокируем
-                // Если аудио играет в отдельном слоте - блокируем
-                return false; // Для триггеров всегда разрешаем
-            }
-        }
-        
-        return false;
+        return _triggerManager.ShouldBlockTrigger(videoSlot, audioSlot, imageSlot);
     }
 
 
@@ -1724,8 +1394,7 @@ public partial class MainWindow : Window
 
     private Border? FindMediaBorder()
     {
-        // Прямое обращение к Border по имени
-        return mediaBorder;
+        return _uiSearchService.FindMediaBorder();
     }
 
 
@@ -1759,6 +1428,7 @@ public partial class MainWindow : Window
     private string GetPauseMenuItemText(string? tag)
     {
         // Метод оставлен для обратной совместимости, но логика теперь в ContextMenuService
+        // Используем делегаты для получения состояния
         if (string.IsNullOrEmpty(tag)) return "Пауза";
 
         if (tag.StartsWith("Slot_"))
@@ -1768,14 +1438,8 @@ public partial class MainWindow : Window
             {
                 var slotKey = $"Slot_{column}_{row}";
                 
-                // Проверяем состояние основного медиа
-                if (_currentMainMedia == slotKey && _isVideoPaused)
-                {
-                    return "Продолжить";
-                }
-                
-                // Проверяем состояние аудио
-                if (_currentAudioContent == slotKey && _audioPausedStates.ContainsKey(slotKey) && _audioPausedStates[slotKey])
+                // Проверяем состояние через делегат из ContextMenuService
+                if (_contextMenuService.IsSlotPaused != null && _contextMenuService.IsSlotPaused(slotKey))
                 {
                     return "Продолжить";
                 }
@@ -1786,7 +1450,10 @@ public partial class MainWindow : Window
             var parts = tag.Split('_');
             if (parts.Length >= 2 && int.TryParse(parts[1], out int column))
             {
-                if (_activeTriggerColumn == column && GetTriggerState(column) == TriggerState.Paused)
+                var activeTriggerColumn = _contextMenuService.GetActiveTriggerColumn?.Invoke();
+                var triggerState = _contextMenuService.GetTriggerState?.Invoke(column);
+                
+                if (activeTriggerColumn == column && triggerState == TriggerState.Paused)
                 {
                     return "Продолжить";
                 }
@@ -1801,87 +1468,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void RestartItem_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is MenuItem menuItem && menuItem.Tag is string tag)
-        {
-            if (tag.StartsWith("Slot_"))
-            {
-                // Для слотов - перезапуск воспроизведения
-                var parts = tag.Split('_');
-                if (parts.Length >= 3 && int.TryParse(parts[1], out int column) && int.TryParse(parts[2], out int row))
-                {
-                    var slot = _projectManager.CurrentProject.MediaSlots.FirstOrDefault(s => s.Column == column && s.Row == row);
-                    if (slot != null)
-                    {
-                        // Проверяем, воспроизводится ли этот слот сейчас
-                        var slotKey = $"Slot_{column}_{row}";
-                        bool isMainMedia = _currentMainMedia == slotKey;
-                        bool isAudioMedia = _currentAudioContent == slotKey && _activeAudioSlots.ContainsKey(slotKey);
-                        
-                        if (isMainMedia || isAudioMedia)
-                        {
-                            // Если это текущий слот - перезапускаем с самого начала
-                            if (isMainMedia)
-                            {
-                                mediaElement.Stop(); // Полная остановка
-                                mediaElement.Position = TimeSpan.Zero; // Сброс позиции
-                                _isVideoPaused = false;
-                                
-                                // Синхронизируем перезапуск со вторым экраном
-                                if (_secondaryMediaElement != null && _secondaryMediaElement.Source != null &&
-                                    mediaElement.Source != null &&
-                                    mediaElement.Source.LocalPath == _secondaryMediaElement.Source.LocalPath)
-                                {
-                                    try
-                                    {
-                                        _secondaryMediaElement.Stop();
-                                        _secondaryMediaElement.Position = TimeSpan.Zero;
-                                        System.Diagnostics.Debug.WriteLine("ПЕРЕЗАПУСК: Синхронизирован со вторым экраном");
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        System.Diagnostics.Debug.WriteLine($"Ошибка при перезапуске на втором экране: {ex.Message}");
-                                    }
-                                }
-                                
-                                mediaElement.Play(); // Запуск с начала
-                                
-                                // Синхронизируем запуск со вторым экраном
-                                if (_secondaryMediaElement != null && _secondaryMediaElement.Source != null)
-                                {
-                                    try
-                                    {
-                                        _secondaryMediaElement.Play();
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        System.Diagnostics.Debug.WriteLine($"Ошибка при запуске на втором экране: {ex.Message}");
-                                    }
-                                }
-                            }
-                            
-                            if (isAudioMedia)
-                            {
-                                var audioElement = _activeAudioSlots[slotKey];
-                                audioElement.Stop(); // Полная остановка
-                                audioElement.Position = TimeSpan.Zero; // Сброс позиции
-                                _audioPausedStates[slotKey] = false;
-                                
-                                audioElement.Play(); // Запуск с начала
-                            }
-                        }
-                        else
-                        {
-                            // Если это не текущий слот - просто запускаем
-                            var button = FindButtonByTag(tag);
-                            if (button != null)
-                            {
-                                Slot_Click(button, new RoutedEventArgs());
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        _contextMenuHandlerService.HandleRestartItemClick(sender, e);
     }
 
     /// <summary>
@@ -1889,82 +1476,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void PauseItem_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is MenuItem menuItem && menuItem.Tag is string tag)
-        {
-            if (tag.StartsWith("Slot_"))
-            {
-                // Для слотов - пауза/возобновление
-                var parts = tag.Split('_');
-                if (parts.Length >= 3 && int.TryParse(parts[1], out int column) && int.TryParse(parts[2], out int row))
-                {
-                    var slotKey = $"Slot_{column}_{row}";
-                    
-                    // Проверяем, воспроизводится ли этот слот сейчас
-                    bool isMainMedia = _currentMainMedia == slotKey && mediaElement.Source != null;
-                    bool isAudioMedia = _currentAudioContent == slotKey && _activeAudioSlots.ContainsKey(slotKey);
-                    
-                    if (isMainMedia || isAudioMedia)
-                    {
-                        // Проверяем состояние воспроизведения
-                        if (isMainMedia)
-                        {
-                            // Управляем основным медиа (видео/изображение)
-                            if (_isVideoPaused)
-                            {
-                                // Видео на паузе - возобновляем
-                                mediaElement.Play();
-                                SyncPlayWithSecondaryScreen();
-                                _isVideoPaused = false;
-                                
-                            }
-                            else
-                            {
-                                // Видео воспроизводится - ставим на паузу
-                                mediaElement.Pause();
-                                SyncPauseWithSecondaryScreen();
-                                _isVideoPaused = true;
-                                
-                            }
-                        }
-                        
-                        if (isAudioMedia)
-                        {
-                            // Управляем аудио - безопасно получаем элемент
-                            if (_mediaStateService.TryGetAudioSlot(slotKey, out var audioElement) && audioElement != null)
-                            {
-                                bool isAudioPaused = _mediaStateService.IsAudioPaused(slotKey);
-                                
-                                if (isAudioPaused)
-                                {
-                                    // Аудио на паузе - возобновляем
-                                    audioElement.Play();
-                                    _mediaStateService.SetAudioPaused(slotKey, false);
-                                }
-                                else
-                                {
-                                    // Аудио воспроизводится - ставим на паузу
-                                    audioElement.Pause();
-                                    _mediaStateService.SetAudioPaused(slotKey, true);
-                                }
-                            }
-                            else
-                            {
-                                System.Diagnostics.Debug.WriteLine($"ОШИБКА: Аудио элемент не найден для слота {slotKey} в PauseItem_Click");
-                            }
-                        }
-                    }
-                    else
-                    {
-                        // Если этот слот не воспроизводится сейчас, запускаем его
-                        var button = FindButtonByTag(tag);
-                        if (button != null)
-                        {
-                            Slot_Click(button, new RoutedEventArgs());
-                        }
-                    }
-                }
-            }
-        }
+        _contextMenuHandlerService.HandlePauseItemClick(sender, e);
     }
 
     /// <summary>
@@ -1972,20 +1484,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void SettingsItem_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is MenuItem menuItem && menuItem.Tag is string slotKey)
-        {
-            // Находим слот в проекте
-            var parts = slotKey.Split('_');
-            if (parts.Length >= 3 && int.TryParse(parts[1], out int column) && int.TryParse(parts[2], out int row))
-            {
-                var mediaSlot = _projectManager.CurrentProject.MediaSlots.FirstOrDefault(s => s.Column == column && s.Row == row);
-                if (mediaSlot != null)
-                {
-                    // Выбираем элемент для настройки
-                    SelectElementForSettings(mediaSlot, slotKey);
-                }
-            }
-        }
+        _contextMenuHandlerService.HandleSettingsItemClick(sender, e);
     }
 
     /// <summary>
@@ -1993,38 +1492,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void DeleteItem_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is MenuItem menuItem && menuItem.Tag is string tag)
-        {
-            System.Diagnostics.Debug.WriteLine($"ПОПЫТКА УДАЛЕНИЯ: Тег = {tag}");
-            
-            var result = MessageBox.Show("Вы уверены, что хотите удалить этот элемент?", "Подтверждение удаления", 
-                MessageBoxButton.YesNo, MessageBoxImage.Question);
-            
-            if (result == MessageBoxResult.Yes)
-            {
-                if (tag.StartsWith("Slot_"))
-                {
-                    // Удаляем слот из проекта
-                    var parts = tag.Split('_');
-                    if (parts.Length >= 3 && int.TryParse(parts[1], out int column) && int.TryParse(parts[2], out int row))
-                    {
-                        System.Diagnostics.Debug.WriteLine($"УДАЛЕНИЕ СЛОТА: Колонка = {column}, Строка = {row}");
-                        
-                        var slot = _projectManager.CurrentProject.MediaSlots.FirstOrDefault(s => s.Column == column && s.Row == row);
-                        if (slot != null)
-                        {
-                            _projectManager.CurrentProject.MediaSlots.Remove(slot);
-                            UpdateSlotButton(column, row, "", MediaType.Video); // Очищаем слот
-                            System.Diagnostics.Debug.WriteLine($"СЛОТ УДАЛЕН: {column}_{row}");
-                        }
-                        else
-                        {
-                            System.Diagnostics.Debug.WriteLine($"СЛОТ НЕ НАЙДЕН: {column}_{row}");
-                        }
-                    }
-                }
-            }
-        }
+        _contextMenuHandlerService.HandleDeleteItemClick(sender, e);
     }
 
     /// <summary>
@@ -2032,7 +1500,7 @@ public partial class MainWindow : Window
     /// </summary>
     private Button? FindButtonByTag(string tag)
     {
-        return FindVisualChild<Button>(BottomPanel, b => b.Tag?.ToString() == tag);
+        return _uiSearchService.FindButtonByTag(tag);
     }
 
     /// <summary>
@@ -2040,17 +1508,7 @@ public partial class MainWindow : Window
     /// </summary>
     private T? FindVisualChild<T>(DependencyObject parent, Func<T, bool> predicate) where T : DependencyObject
     {
-        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
-        {
-            var child = VisualTreeHelper.GetChild(parent, i);
-            if (child is T t && predicate(t))
-                return t;
-            
-            var childOfChild = FindVisualChild<T>(child, predicate);
-            if (childOfChild != null)
-                return childOfChild;
-        }
-        return null;
+        return _uiSearchService.FindVisualChild(parent, predicate);
     }
     
     #region Slider Event Handlers
@@ -2477,6 +1935,9 @@ public partial class MainWindow
         {
             _isStorageModeUiInitializing = false;
         }
+        
+        // Обновляем доступность переключателей режима хранения
+        _storageModeService.UpdateStorageModeControlsAvailability();
     }
     
     // Применить переход между медиа элементами
@@ -2517,6 +1978,144 @@ public partial class MainWindow
         
         // Закрываем дополнительное окно
         CloseSecondaryScreenWindow();
+    }
+    
+    /// <summary>
+    /// Обрабатывает событие окончания воспроизведения медиа
+    /// </summary>
+    private void HandleMediaEnded()
+    {
+        var settings = _projectManager?.CurrentProject?.GlobalSettings;
+        if (settings == null) return;
+        
+        bool shouldLoop = settings.LoopPlaylist;
+        bool shouldAutoPlay = settings.AutoPlayNext;
+        
+        // Если ничего не включено - просто останавливаемся на последнем кадре
+        if (!shouldLoop && !shouldAutoPlay)
+        {
+            // Останавливаем второй экран
+            if (_secondaryScreenWindow != null && _secondaryMediaElement != null && 
+                _secondaryMediaElement.Source != null &&
+                _secondaryScreenWindow.Content == _secondaryMediaElement)
+            {
+                try
+                {
+                    _secondaryMediaElement.Stop();
+                    System.Diagnostics.Debug.WriteLine("ВИДЕО ЗАВЕРШЕНО: Остановлено на обоих экранах (ничего не включено)");
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Ошибка при остановке второго экрана: {ex.Message}");
+                }
+            }
+            
+            // Останавливаем VLC видео если играет
+            if (_vlcVideoService.HasMedia())
+            {
+                _vlcVideoService.Stop();
+            }
+            
+            return; // Просто останавливаемся, ничего не делаем
+        }
+        
+        // Если включено зацикливание - перезапускаем текущее видео
+        if (shouldLoop)
+        {
+            try
+            {
+                // Проверяем, какое видео играет - VLC или MediaElement
+                if (_vlcVideoService.HasMedia())
+                {
+                    // Для VLC используем метод Restart для перезагрузки медиа
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        try
+                        {
+                            // Перезапускаем основное видео
+                            _vlcVideoService.Restart();
+                            
+                            // Перезапускаем VLC на втором экране
+                            if (_vlcVideoService.HasMedia(forSecondary: true))
+                            {
+                                _vlcVideoService.Restart(forSecondary: true);
+                            }
+                            
+                            isVideoPlaying = true;
+                            System.Diagnostics.Debug.WriteLine("VLC ВИДЕО ЗАВЕРШЕНО: Перезапуск с начала (зацикливание)");
+                        }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"Ошибка при перезапуске VLC: {ex.Message}");
+                        }
+                    }), System.Windows.Threading.DispatcherPriority.Normal);
+                }
+                else if (mediaElement.Source != null)
+                {
+                    // Для MediaElement перематываем на начало и запускаем воспроизведение
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        try
+                        {
+                            // Перематываем на начало
+                            mediaElement.Position = TimeSpan.Zero;
+                            
+                            // Всегда запускаем воспроизведение
+                            mediaElement.Play();
+                            isVideoPlaying = true;
+                            
+                            // Перематываем второй экран
+                            if (_secondaryScreenWindow != null && _secondaryMediaElement != null && 
+                                _secondaryMediaElement.Source != null &&
+                                _secondaryScreenWindow.Content == _secondaryMediaElement)
+                            {
+                                _secondaryMediaElement.Position = TimeSpan.Zero;
+                                _secondaryMediaElement.Play();
+                            }
+                            
+                            System.Diagnostics.Debug.WriteLine("ВИДЕО ЗАВЕРШЕНО: Перезапуск с начала на обоих экранах (зацикливание)");
+                        }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"Ошибка при перезапуске MediaElement: {ex.Message}");
+                        }
+                    }), System.Windows.Threading.DispatcherPriority.Normal);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка при перезапуске: {ex.Message}");
+            }
+            return; // Не переходим к следующему элементу при зацикливании
+        }
+        
+        // Если включено автовоспроизведение - переходим к следующему элементу
+        if (shouldAutoPlay)
+        {
+            // Останавливаем второй экран перед переходом к следующему
+            if (_secondaryScreenWindow != null && _secondaryMediaElement != null && 
+                _secondaryMediaElement.Source != null &&
+                _secondaryScreenWindow.Content == _secondaryMediaElement)
+            {
+                try
+                {
+                    _secondaryMediaElement.Stop();
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Ошибка при остановке второго экрана: {ex.Message}");
+                }
+            }
+            
+            // Останавливаем VLC видео перед переходом к следующему
+            if (_vlcVideoService.HasMedia())
+            {
+                _vlcVideoService.Stop();
+            }
+            
+            // Переходим к следующему элементу
+            Dispatcher.Invoke(() => AutoPlayNextElement());
+        }
     }
     
     // Обработчики для перетаскивания панели настроек элемента
@@ -2832,55 +2431,7 @@ public partial class MainWindow
     /// </summary>
     private void StorageModeRadio_Checked(object sender, RoutedEventArgs e)
     {
-        // Не реагируем на события, которые были вызваны программной установкой IsChecked при старте
-        if (_isStorageModeUiInitializing)
-        {
-            return;
-        }
-
-        if (sender is RadioButton radioButton && radioButton.Tag is string modeString)
-        {
-            if (Enum.TryParse<StorageMode>(modeString, out var storageMode))
-            {
-                // Если пользователь выбрал Embedded, но проект еще не сохранен — не открываем диалог при старте.
-                // Просим пользователя сначала сохранить проект вручную (File -> Save Project As).
-                if (storageMode == StorageMode.Embedded && !_projectManager.HasProjectFilePath)
-                {
-                    _isStorageModeUiInitializing = true;
-                    try
-                    {
-                        StorageModePathsRadio.IsChecked = true;
-                        StorageModeEmbeddedRadio.IsChecked = false;
-                        _projectManager.CurrentProject.GlobalSettings.StorageMode = StorageMode.Paths;
-                        StorageModeInfoText.Text = "Текущий режим: Пути к файлам (сначала сохраните проект, чтобы включить копирование)";
-                    }
-                    finally
-                    {
-                        _isStorageModeUiInitializing = false;
-                    }
-
-                    MessageBox.Show(
-                        "Чтобы включить режим \"Копировать в папку проекта\", сначала сохраните проект (Файл → Сохранить проект как).\n" +
-                        "После сохранения можно снова выбрать этот режим.",
-                        "Проект не сохранен",
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Information);
-                    return;
-                }
-
-                _projectManager.CurrentProject.GlobalSettings.StorageMode = storageMode;
-                
-                // Обновляем текст информации
-                string modeText = storageMode == StorageMode.Paths 
-                    ? "Пути к файлам (экономно)" 
-                    : "Копировать в папку проекта (автономно)";
-                StorageModeInfoText.Text = $"Текущий режим: {modeText}";
-                
-                System.Diagnostics.Debug.WriteLine($"StorageMode изменен на: {storageMode}");
-                // ВАЖНО: не сохраняем автоматически, чтобы не всплывал диалог Save/Open при старте.
-                // Проект будет сохранён пользователем через меню.
-            }
-        }
+        _storageModeService.HandleStorageModeRadioChecked(sender, e);
     }
     
     /// <summary>
@@ -2888,23 +2439,6 @@ public partial class MainWindow
     /// </summary>
     private void MediaElement_MediaFailed(object sender, ExceptionRoutedEventArgs e)
     {
-        var errorMessage = e.ErrorException?.Message ?? "Неизвестная ошибка";
-        var errorCode = e.ErrorException?.HResult.ToString("X") ?? "N/A";
-        
-        System.Diagnostics.Debug.WriteLine($"ОШИБКА MediaElement: {errorMessage}");
-        System.Diagnostics.Debug.WriteLine($"ОШИБКА MediaElement Code: {errorCode}");
-        System.Diagnostics.Debug.WriteLine($"ОШИБКА MediaElement StackTrace: {e.ErrorException?.StackTrace}");
-        
-        // Расшифровка кода ошибки
-        string errorDescription = errorCode switch
-        {
-            "0xC00D109B" => "Формат файла не поддерживается Windows Media Foundation.\n\nВозможные решения:\n1. Установите K-Lite Codec Pack\n2. Конвертируйте видео в MP4 (H.264)\n3. Используйте другой формат файла",
-            "0x80070002" => "Файл не найден",
-            "0x80070005" => "Нет доступа к файлу",
-            _ => $"Код ошибки: {errorCode}"
-        };
-        
-        MessageBox.Show($"Ошибка при загрузке медиа:\n{errorMessage}\n\n{errorDescription}", 
-            "Ошибка MediaElement", MessageBoxButton.OK, MessageBoxImage.Error);
+        _mediaElementErrorHandlerService.HandleMediaFailed(sender, e);
     }
 }

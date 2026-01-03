@@ -152,7 +152,7 @@ namespace ArenaApp.Services
         /// <summary>
         /// Определяет текст для пункта "Пауза/Продолжить" в зависимости от текущего состояния
         /// </summary>
-        private string GetPauseMenuItemText(string? tag)
+        public string GetPauseMenuItemText(string? tag)
         {
             if (string.IsNullOrEmpty(tag)) return "Пауза";
 

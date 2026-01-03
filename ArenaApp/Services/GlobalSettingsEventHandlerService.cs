@@ -12,6 +12,7 @@ namespace ArenaApp.Services
     {
         private ProjectManager? _projectManager;
         private TransitionService? _transitionService;
+        private bool _isUpdatingCheckboxes = false; // Флаг для предотвращения рекурсии
         
         // Делегаты для доступа к UI элементам
         public Func<CheckBox>? GetUseGlobalVolumeCheckBox { get; set; }
@@ -342,11 +343,33 @@ namespace ArenaApp.Services
         public void OnAutoPlayNextCheckBoxChanged(object sender, RoutedEventArgs e)
         {
             if (_projectManager?.CurrentProject?.GlobalSettings == null) return;
+            if (_isUpdatingCheckboxes) return; // Предотвращаем рекурсию
             
             var autoPlayNextCheckBox = GetAutoPlayNextCheckBox?.Invoke();
             if (autoPlayNextCheckBox != null)
             {
-                _projectManager.CurrentProject.GlobalSettings.AutoPlayNext = autoPlayNextCheckBox.IsChecked == true;
+                bool isChecked = autoPlayNextCheckBox.IsChecked == true;
+                
+                // Если включаем автовоспроизведение - выключаем зацикливание
+                if (isChecked)
+                {
+                    var loopPlaylistCheckBox = GetLoopPlaylistCheckBox?.Invoke();
+                    if (loopPlaylistCheckBox != null && loopPlaylistCheckBox.IsChecked == true)
+                    {
+                        _isUpdatingCheckboxes = true;
+                        try
+                        {
+                            loopPlaylistCheckBox.IsChecked = false;
+                            _projectManager.CurrentProject.GlobalSettings.LoopPlaylist = false;
+                        }
+                        finally
+                        {
+                            _isUpdatingCheckboxes = false;
+                        }
+                    }
+                }
+                
+                _projectManager.CurrentProject.GlobalSettings.AutoPlayNext = isChecked;
                 SaveProject?.Invoke();
             }
         }
@@ -357,11 +380,33 @@ namespace ArenaApp.Services
         public void OnLoopPlaylistCheckBoxChanged(object sender, RoutedEventArgs e)
         {
             if (_projectManager?.CurrentProject?.GlobalSettings == null) return;
+            if (_isUpdatingCheckboxes) return; // Предотвращаем рекурсию
             
             var loopPlaylistCheckBox = GetLoopPlaylistCheckBox?.Invoke();
             if (loopPlaylistCheckBox != null)
             {
-                _projectManager.CurrentProject.GlobalSettings.LoopPlaylist = loopPlaylistCheckBox.IsChecked == true;
+                bool isChecked = loopPlaylistCheckBox.IsChecked == true;
+                
+                // Если включаем зацикливание - выключаем автовоспроизведение
+                if (isChecked)
+                {
+                    var autoPlayNextCheckBox = GetAutoPlayNextCheckBox?.Invoke();
+                    if (autoPlayNextCheckBox != null && autoPlayNextCheckBox.IsChecked == true)
+                    {
+                        _isUpdatingCheckboxes = true;
+                        try
+                        {
+                            autoPlayNextCheckBox.IsChecked = false;
+                            _projectManager.CurrentProject.GlobalSettings.AutoPlayNext = false;
+                        }
+                        finally
+                        {
+                            _isUpdatingCheckboxes = false;
+                        }
+                    }
+                }
+                
+                _projectManager.CurrentProject.GlobalSettings.LoopPlaylist = isChecked;
                 SaveProject?.Invoke();
             }
         }

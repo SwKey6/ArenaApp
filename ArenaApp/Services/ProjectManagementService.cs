@@ -31,6 +31,9 @@ namespace ArenaApp.Services
         public Action? LoadPanelPositions { get; set; }
         public Action? SavePanelPositions { get; set; }
         public Action? CloseSecondaryScreenWindow { get; set; }
+        public Action? UpdateStorageModeControlsAvailability { get; set; }
+        public Action? SaveSelectedStorageModeToProject { get; set; }
+        public Action? ApplyStorageModeFromProject { get; set; }
         
         // Делегаты для показа сообщений
         public Action<string, string>? ShowMessage { get; set; }
@@ -94,6 +97,9 @@ namespace ArenaApp.Services
             // Загружаем позиции панелей по умолчанию
             LoadPanelPositions?.Invoke();
             
+            // Разблокируем переключатели режима хранения для нового проекта
+            UpdateStorageModeControlsAvailability?.Invoke();
+            
             ShowMessage?.Invoke("Новый проект создан", "Информация");
         }
         
@@ -111,6 +117,8 @@ namespace ArenaApp.Services
                 LoadProjectSlots?.Invoke();
                 LoadGlobalSettings?.Invoke();
                 LoadPanelPositions?.Invoke(); // Загружаем сохраненные позиции панелей
+                // Блокируем переключатели режима хранения, если проект уже сохранен
+                UpdateStorageModeControlsAvailability?.Invoke();
                 ShowMessage?.Invoke("Проект загружен", "Информация");
             }
         }
@@ -122,10 +130,19 @@ namespace ArenaApp.Services
         {
             if (_projectManager == null) return;
             
+            // Сохраняем выбранный режим хранения из UI в проект перед сохранением
+            SaveSelectedStorageModeToProject?.Invoke();
+            
             SavePanelPositions?.Invoke(); // Сохраняем текущие позиции панелей
             if (_projectManager.SaveProject())
             {
                 ShowMessage?.Invoke("Проект сохранен", "Информация");
+                
+                // Применяем режим из проекта в UI после сохранения
+                ApplyStorageModeFromProject?.Invoke();
+                
+                // Блокируем переключатели режима хранения после сохранения
+                UpdateStorageModeControlsAvailability?.Invoke();
             }
         }
         

@@ -5,6 +5,8 @@ using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using LibVLCSharp.Shared;
+using LibVLCSharp.WPF;
 using DrawingPoint = System.Drawing.Point;
 
 namespace ArenaApp.Services
@@ -57,8 +59,13 @@ namespace ArenaApp.Services
         public Action<MediaElement>? SetSecondaryMediaElement { get; set; }
         public Func<Window?>? GetSecondaryScreenWindow { get; set; }
         
+        // Делегаты для VLC VideoView
+        public Func<LibVLCSharp.Shared.MediaPlayer>? GetVlcSecondaryPlayer { get; set; }
+        public Action<VideoView>? SetSecondaryVlcVideoView { get; set; }
+        
         public Window? SecondaryScreenWindow => _secondaryScreenWindow;
         public MediaElement? SecondaryMediaElement => _secondaryMediaElement;
+        public VideoView? SecondaryVlcVideoView { get; private set; }
         
         /// <summary>
         /// Создает окно на дополнительном экране
@@ -100,7 +107,9 @@ namespace ArenaApp.Services
                         WindowState = WindowState.Normal,
                         // Временно устанавливаем позицию на основном экране, чтобы окно создалось
                         Left = 0,
-                        Top = 0
+                        Top = 0,
+                        // Убеждаемся, что содержимое окна правильно растягивается
+                        SizeToContent = SizeToContent.Manual
                     };
                     
                     // Создаем MediaElement для дополнительного экрана
@@ -112,6 +121,8 @@ namespace ArenaApp.Services
                         HorizontalAlignment = HorizontalAlignment.Stretch,
                         VerticalAlignment = VerticalAlignment.Stretch,
                         Margin = new Thickness(0),
+                        Width = screen.Bounds.Width,
+                        Height = screen.Bounds.Height,
                         Volume = 0 // Отключаем звук на втором экране чтобы избежать дублирования
                     };
                     
@@ -119,6 +130,37 @@ namespace ArenaApp.Services
                     
                     // Уведомляем о создании MediaElement
                     SetSecondaryMediaElement?.Invoke(_secondaryMediaElement);
+                    
+                    // Подготавливаем VLC VideoView для второго экрана (используем только при VLC-видео)
+                    if (GetVlcSecondaryPlayer != null)
+                    {
+                        try
+                        {
+                            var secondaryPlayer = GetVlcSecondaryPlayer.Invoke();
+                            if (secondaryPlayer != null)
+                            {
+                                // Создаем VLC VideoView для второго экрана
+                                SecondaryVlcVideoView = new VideoView
+                                {
+                                    MediaPlayer = secondaryPlayer,
+                                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                                    VerticalAlignment = VerticalAlignment.Stretch,
+                                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                                    VerticalContentAlignment = VerticalAlignment.Stretch,
+                                    Margin = new Thickness(0),
+                                    Width = screen.Bounds.Width,
+                                    Height = screen.Bounds.Height
+                                };
+                                
+                                SetSecondaryVlcVideoView?.Invoke(SecondaryVlcVideoView);
+                                System.Diagnostics.Debug.WriteLine("SecondaryScreenService: VLC VideoView создан для второго экрана");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"Ошибка при создании VLC VideoView для второго экрана: {ex.Message}");
+                        }
+                    }
                     
                     // Показываем окно сначала (на основном экране)
                     _secondaryScreenWindow.Show();
@@ -252,6 +294,19 @@ namespace ArenaApp.Services
                             // Устанавливаем только размер через WPF для совместимости
                             _secondaryScreenWindow.Width = screen.Bounds.Width;
                             _secondaryScreenWindow.Height = screen.Bounds.Height;
+                            
+                            // Обновляем размеры содержимого (MediaElement и VideoView)
+                            if (_secondaryMediaElement != null)
+                            {
+                                _secondaryMediaElement.Width = screen.Bounds.Width;
+                                _secondaryMediaElement.Height = screen.Bounds.Height;
+                            }
+                            if (SecondaryVlcVideoView != null)
+                            {
+                                SecondaryVlcVideoView.Width = screen.Bounds.Width;
+                                SecondaryVlcVideoView.Height = screen.Bounds.Height;
+                            }
+                            
                             _secondaryScreenWindow.UpdateLayout();
                             
                             System.Diagnostics.Debug.WriteLine($"ОКНО СОЗДАНО НА ЭКРАНЕ {selectedScreenIndex + 1}:");
@@ -262,6 +317,21 @@ namespace ArenaApp.Services
                             System.Diagnostics.Debug.WriteLine($"  Фактический размер (Actual): {_secondaryScreenWindow.ActualWidth}x{_secondaryScreenWindow.ActualHeight}");
                             System.Diagnostics.Debug.WriteLine($"  WindowState: {_secondaryScreenWindow.WindowState}");
                         }), System.Windows.Threading.DispatcherPriority.Loaded);
+                    };
+                    
+                    // Добавляем обработчик для обновления размеров при изменении размера окна
+                    _secondaryScreenWindow.SizeChanged += (s, e) =>
+                    {
+                        if (_secondaryMediaElement != null)
+                        {
+                            _secondaryMediaElement.Width = e.NewSize.Width;
+                            _secondaryMediaElement.Height = e.NewSize.Height;
+                        }
+                        if (SecondaryVlcVideoView != null)
+                        {
+                            SecondaryVlcVideoView.Width = e.NewSize.Width;
+                            SecondaryVlcVideoView.Height = e.NewSize.Height;
+                        }
                     };
                     
                     // Отладочная информация в консоль вместо MessageBox

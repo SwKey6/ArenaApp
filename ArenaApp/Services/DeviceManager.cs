@@ -63,22 +63,52 @@ namespace ArenaApp.Services
         public List<string> GetAudioOutputDevices()
         {
             var devices = new List<string>();
+            
             try
             {
-                var enumerator = new MMDeviceEnumerator();
-                var endpoints = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
+                // Используем NAudio для получения реальных устройств звука
+                var deviceEnumerator = new MMDeviceEnumerator();
+                var devicesCollection = deviceEnumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
                 
-                foreach (var endpoint in endpoints)
+                foreach (var device in devicesCollection)
                 {
-                    devices.Add(endpoint.FriendlyName);
+                    devices.Add(device.FriendlyName);
+                    device.Dispose();
+                }
+                
+                deviceEnumerator.Dispose();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка при получении устройств звука: {ex.Message}");
+                // Fallback - добавляем стандартное устройство
+                devices.Add("Устройство по умолчанию");
+            }
+            
+            return devices;
+        }
+        
+        /// <summary>
+        /// Настраивает выбранное аудиоустройство
+        /// </summary>
+        public void ConfigureAudioDevice()
+        {
+            try
+            {
+                if (!_useSelectedAudio) return;
+                
+                var audioDevices = GetAudioOutputDevices();
+                if (_selectedAudioDeviceIndex >= 0 && _selectedAudioDeviceIndex < audioDevices.Count)
+                {
+                    // Здесь можно добавить логику для настройки конкретного аудиоустройства
+                    // Пока что просто выводим информацию
+                    System.Diagnostics.Debug.WriteLine($"Выбрано аудиоустройство: {audioDevices[_selectedAudioDeviceIndex]}");
                 }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Ошибка при получении аудиоустройств: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"Ошибка при настройке аудиоустройства: {ex.Message}");
             }
-            
-            return devices;
         }
     }
     

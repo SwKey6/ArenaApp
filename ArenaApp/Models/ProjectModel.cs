@@ -88,6 +88,19 @@ namespace ArenaApp.Models
         
         // Режим хранения медиафайлов
         public StorageMode StorageMode { get; set; } = StorageMode.Paths;  // По умолчанию - пути
+        
+        // Настройки вывода на второй экран
+        public OutputSettings OutputSettings { get; set; } = new OutputSettings();
+    }
+    
+    public class OutputSettings
+    {
+        public int PositionX { get; set; } = 0;  // Позиция X относительно экрана
+        public int PositionY { get; set; } = 0;  // Позиция Y относительно экрана
+        public int OutputWidth { get; set; } = 1920;  // Ширина вывода
+        public int OutputHeight { get; set; } = 1080;  // Высота вывода
+        public double ScaleX { get; set; } = 100.0;  // Масштаб по X в процентах
+        public double ScaleY { get; set; } = 100.0;  // Масштаб по Y в процентах
     }
     
     public class PanelLayout

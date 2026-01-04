@@ -1032,3 +1032,5 @@ C:\MyApps\Arena\ArenaApp\ArenaApp\bin\Debug\net8.0-windows\LibVLCSharp.dll
 C:\MyApps\Arena\ArenaApp\ArenaApp\bin\Debug\net8.0-windows\LibVLCSharp.WPF.dll
 C:\MyApps\Arena\ArenaApp\ArenaApp\obj\Debug\net8.0-windows\ArenaApp_Content.g.cs
 C:\MyApps\Arena\ArenaApp\ArenaApp\obj\Debug\net8.0-windows\App.baml
+C:\MyApps\Arena\ArenaApp\ArenaApp\obj\Debug\net8.0-windows\SettingsWindow.baml
+C:\MyApps\Arena\ArenaApp\ArenaApp\obj\Debug\net8.0-windows\SettingsWindow.g.cs

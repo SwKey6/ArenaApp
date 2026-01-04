@@ -34,6 +34,8 @@ namespace ArenaApp.Services
         public Action? UpdateStorageModeControlsAvailability { get; set; }
         public Action? SaveSelectedStorageModeToProject { get; set; }
         public Action? ApplyStorageModeFromProject { get; set; }
+        public Action? LoadOutputSettings { get; set; }
+        public Action? SaveOutputSettings { get; set; }
         
         // Делегаты для показа сообщений
         public Action<string, string>? ShowMessage { get; set; }
@@ -117,6 +119,7 @@ namespace ArenaApp.Services
                 LoadProjectSlots?.Invoke();
                 LoadGlobalSettings?.Invoke();
                 LoadPanelPositions?.Invoke(); // Загружаем сохраненные позиции панелей
+                LoadOutputSettings?.Invoke(); // Загружаем настройки вывода
                 // Блокируем переключатели режима хранения, если проект уже сохранен
                 UpdateStorageModeControlsAvailability?.Invoke();
                 ShowMessage?.Invoke("Проект загружен", "Информация");
@@ -134,6 +137,7 @@ namespace ArenaApp.Services
             SaveSelectedStorageModeToProject?.Invoke();
             
             SavePanelPositions?.Invoke(); // Сохраняем текущие позиции панелей
+            SaveOutputSettings?.Invoke(); // Сохраняем настройки вывода
             if (_projectManager.SaveProject())
             {
                 ShowMessage?.Invoke("Проект сохранен", "Информация");

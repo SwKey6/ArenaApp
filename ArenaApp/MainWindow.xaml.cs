@@ -183,6 +183,14 @@ public partial class MainWindow : Window
         set => _deviceManager.UseSelectedScreen = value;
     }
     
+    // Настройки вывода на второй экран
+    private int _outputPositionX = 0;
+    private int _outputPositionY = 0;
+    private int _outputWidth = 1920;
+    private int _outputHeight = 1080;
+    private double _outputScaleX = 100.0;
+    private double _outputScaleY = 100.0;
+    
     private bool _useSelectedAudio
     {
         get => _deviceManager.UseSelectedAudio;
@@ -205,6 +213,7 @@ public partial class MainWindow : Window
     // VLC видео (встроенные декодеры)
     private readonly Services.VlcVideoService _vlcVideoService = new();
     private LibVLCSharp.WPF.VideoView? _secondaryVlcVideoView;
+    private bool _vlcDualScreenModeEnabled = false;
     
     // Сервисы для перетаскивания панелей
     private readonly Services.PanelDragService _elementSettingsDragService = new();
@@ -243,9 +252,8 @@ public partial class MainWindow : Window
             // Загружаем позиции панелей по умолчанию
             LoadPanelPositions();
             
-            // Инициализируем меню экранов и звука
+            // Инициализируем меню экранов
             InitializeScreensMenu();
-            InitializeAudioMenu();
             
             // Подписываемся на событие открытия меню Edit для обновления устройств
             EditMenuItem.SubmenuOpened += EditMenuItem_SubmenuOpened;
@@ -361,10 +369,35 @@ public partial class MainWindow : Window
         _timerService.VideoTimerUpdated += (text) => 
         {
             videoTimerText.Text = text;
-            // Синхронизация VLC со вторым экраном
-            if (_secondaryScreenWindow != null && _secondaryVlcVideoView != null && _vlcVideoService.HasMedia() && !_timerService.IsVideoSliderDragging)
+            // ВАЖНО: не дергаем SecondaryPlayer "жесткой" синхронизацией на каждом тике — это вызывает лаг/заикания.
+            // Вместо этого: второй экран — мастер (со звуком), а основной плеер — беззвучное превью и подстраивается редко.
+            var dualScreenActive =
+                _secondaryScreenWindow != null &&
+                _secondaryVlcVideoView != null &&
+                _vlcVideoService.HasMedia(forSecondary: true) &&
+                _vlcVideoService.HasMedia(forSecondary: false) &&
+                !_timerService.IsVideoSliderDragging;
+
+            if (dualScreenActive)
             {
-                _vlcVideoService.SyncSecondaryPlayer();
+                if (!_vlcDualScreenModeEnabled)
+                {
+                    _vlcVideoService.SetDualScreenAudioMode(enabled: true);
+                    _vlcDualScreenModeEnabled = true;
+                }
+
+                _vlcVideoService.SyncMainToSecondaryThrottled(
+                    driftThreshold: TimeSpan.FromMilliseconds(250),
+                    minInterval: TimeSpan.FromMilliseconds(750)
+                );
+            }
+            else
+            {
+                if (_vlcDualScreenModeEnabled)
+                {
+                    _vlcVideoService.SetDualScreenAudioMode(enabled: false);
+                    _vlcDualScreenModeEnabled = false;
+                }
             }
         };
         _timerService.VideoSliderUpdated += (value) => videoSlider.Value = value;
@@ -720,6 +753,10 @@ public partial class MainWindow : Window
             _secondaryMediaElement = element;
             System.Diagnostics.Debug.WriteLine($"SetSecondaryMediaElement: Установлен MediaElement для второго экрана");
         };
+        _secondaryScreenService.GetOutputPosition = () => (_outputPositionX, _outputPositionY);
+        _secondaryScreenService.GetOutputSize = () => (_outputWidth, _outputHeight);
+        _secondaryScreenService.GetOutputScale = () => (_outputScaleX, _outputScaleY);
+        _secondaryScreenService.SyncMediaAfterWindowCreated = () => SyncMediaToSecondaryScreen();
         _secondaryScreenService.GetVlcSecondaryPlayer = () => _vlcVideoService.SecondaryPlayer;
         _secondaryScreenService.SetSecondaryVlcVideoView = (view) => 
         {
@@ -950,11 +987,12 @@ public partial class MainWindow : Window
         _projectManagementService.UpdateStorageModeControlsAvailability = () => _storageModeService.UpdateStorageModeControlsAvailability();
         _projectManagementService.SaveSelectedStorageModeToProject = () => _storageModeService.SaveSelectedStorageModeToProject();
         _projectManagementService.ApplyStorageModeFromProject = () => _storageModeService.ApplyStorageModeFromProject();
+        _projectManagementService.LoadOutputSettings = () => LoadOutputSettingsFromProject();
+        _projectManagementService.SaveOutputSettings = () => SaveOutputSettingsToProject();
         
         // Настройка MenuService
         _menuService.SetDeviceManager(_deviceManager);
         _menuService.GetScreensMenuItem = () => ScreensMenuItem;
-        _menuService.GetAudioMenuItem = () => AudioMenuItem;
         _menuService.GetAudioOutputDevices = () => GetAudioOutputDevices();
         _menuService.OnScreenMenuItemClick = (screenIndex) => ShowScreenSelectionDialog(screenIndex);
         _menuService.OnAudioMenuItemClick = (deviceIndex) => ShowAudioSelectionDialog(deviceIndex);
@@ -1113,12 +1151,221 @@ public partial class MainWindow : Window
         _dialogService.ShowAudioSelectionDialog(deviceIndex);
     }
     
+    // Обработчик открытия настроек второго экрана
+    private void SettingsMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var settingsWindow = new SettingsWindow
+            {
+                Owner = this
+            };
+            
+            // Настраиваем делегаты для получения текущих значений
+            settingsWindow.GetOutputPosition = () => (_outputPositionX, _outputPositionY);
+            settingsWindow.GetOutputSize = () => (_outputWidth, _outputHeight);
+            settingsWindow.GetOutputScale = () => (_outputScaleX, _outputScaleY);
+            
+            // Настраиваем делегат для применения настроек
+            settingsWindow.ApplySettings = (posX, posY, width, height, scaleX, scaleY) =>
+            {
+                _outputPositionX = posX;
+                _outputPositionY = posY;
+                _outputWidth = width;
+                _outputHeight = height;
+                _outputScaleX = scaleX;
+                _outputScaleY = scaleY;
+                
+                // Сохраняем в проект
+                SaveOutputSettingsToProject();
+                
+                // Применяем настройки
+                ApplyOutputSettings();
+            };
+            
+            settingsWindow.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            System.Windows.MessageBox.Show($"Ошибка при открытии настроек: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+    
+    // Сохранение настроек вывода в проект
+    private void SaveOutputSettingsToProject()
+    {
+        if (_projectManager?.CurrentProject?.GlobalSettings != null)
+        {
+            if (_projectManager.CurrentProject.GlobalSettings.OutputSettings == null)
+            {
+                _projectManager.CurrentProject.GlobalSettings.OutputSettings = new Models.OutputSettings();
+            }
+            
+            _projectManager.CurrentProject.GlobalSettings.OutputSettings.PositionX = _outputPositionX;
+            _projectManager.CurrentProject.GlobalSettings.OutputSettings.PositionY = _outputPositionY;
+            _projectManager.CurrentProject.GlobalSettings.OutputSettings.OutputWidth = _outputWidth;
+            _projectManager.CurrentProject.GlobalSettings.OutputSettings.OutputHeight = _outputHeight;
+            _projectManager.CurrentProject.GlobalSettings.OutputSettings.ScaleX = _outputScaleX;
+            _projectManager.CurrentProject.GlobalSettings.OutputSettings.ScaleY = _outputScaleY;
+        }
+    }
+    
+    // Загрузка настроек вывода из проекта
+    private void LoadOutputSettingsFromProject()
+    {
+        if (_projectManager?.CurrentProject?.GlobalSettings?.OutputSettings != null)
+        {
+            var settings = _projectManager.CurrentProject.GlobalSettings.OutputSettings;
+            _outputPositionX = settings.PositionX;
+            _outputPositionY = settings.PositionY;
+            _outputWidth = settings.OutputWidth;
+            _outputHeight = settings.OutputHeight;
+            _outputScaleX = settings.ScaleX;
+            _outputScaleY = settings.ScaleY;
+            
+            System.Diagnostics.Debug.WriteLine($"LoadOutputSettingsFromProject: Загружены настройки - Позиция=({_outputPositionX}, {_outputPositionY}), Размер={_outputWidth}x{_outputHeight}, Скейл=({_outputScaleX}%, {_outputScaleY}%)");
+            
+            // Применяем настройки (если окно уже создано, они применятся)
+            ApplyOutputSettings();
+            
+            // Если окно еще не создано, но экран выбран, создаем окно с правильными настройками
+            if (_useSelectedScreen && _secondaryScreenWindow == null)
+            {
+                CreateSecondaryScreenWindow();
+            }
+        }
+        else
+        {
+            // Если настройки не найдены, используем значения по умолчанию
+            _outputPositionX = 0;
+            _outputPositionY = 0;
+            _outputWidth = 1920;
+            _outputHeight = 1080;
+            _outputScaleX = 100.0;
+            _outputScaleY = 100.0;
+        }
+    }
+    
+    // Применение настроек вывода к окну второго экрана
+    private void ApplyOutputSettings()
+    {
+        _secondaryScreenService.ApplyOutputSettings();
+    }
+    
+    // Синхронизация медиа со вторым экраном после создания окна
+    private void SyncMediaToSecondaryScreen()
+    {
+        try
+        {
+            // Проверяем, что окно второго экрана существует
+            if (_secondaryScreenWindow == null)
+            {
+                System.Diagnostics.Debug.WriteLine("SyncMediaToSecondaryScreen: Окно второго экрана не создано");
+                return;
+            }
+            
+            // Получаем текущий активный слот
+            var currentSlotKey = _mediaStateService.CurrentMainMedia;
+            if (string.IsNullOrEmpty(currentSlotKey))
+            {
+                System.Diagnostics.Debug.WriteLine("SyncMediaToSecondaryScreen: Нет активного медиа для синхронизации");
+                return;
+            }
+            
+            System.Diagnostics.Debug.WriteLine($"SyncMediaToSecondaryScreen: Начинаем синхронизацию для слота {currentSlotKey}");
+            
+            // Находим слот по ключу
+            var slot = _projectManager.CurrentProject.MediaSlots.FirstOrDefault(s =>
+            {
+                var slotKey = s.IsTrigger ? $"Trigger_{s.Column}" : $"Slot_{s.Column}_{s.Row}";
+                return slotKey == currentSlotKey;
+            });
+            
+            if (slot != null && !string.IsNullOrEmpty(slot.MediaPath))
+            {
+                System.Diagnostics.Debug.WriteLine($"SyncMediaToSecondaryScreen: Синхронизируем {slot.Type} из слота {currentSlotKey}");
+                
+                // Синхронизируем медиа на второй экран
+                if (slot.Type == MediaType.Video || slot.Type == MediaType.Image)
+                {
+                    var secondaryMediaElement = _secondaryScreenService.SecondaryMediaElement;
+                    var mainMediaElement = mediaElement;
+                    
+                    if (secondaryMediaElement != null && mainMediaElement != null)
+                    {
+                        if (slot.Type == MediaType.Video && mainMediaElement.Source != null)
+                        {
+                            secondaryMediaElement.Source = mainMediaElement.Source;
+                            secondaryMediaElement.Position = mainMediaElement.Position;
+                            if (!_isVideoPaused)
+                            {
+                                secondaryMediaElement.Play();
+                            }
+                            System.Diagnostics.Debug.WriteLine($"SyncMediaToSecondaryScreen: Синхронизировано видео - Source={mainMediaElement.Source.LocalPath}, Position={mainMediaElement.Position}");
+                        }
+                        else if (slot.Type == MediaType.Image)
+                        {
+                            // Для изображений создаем Image элемент на втором экране
+                            var absolutePath = _projectManager.GetAbsoluteMediaPath(slot.MediaPath);
+                            if (_secondaryScreenWindow != null && System.IO.File.Exists(absolutePath))
+                            {
+                                // Если содержимое - Grid, заменяем MediaElement на Image
+                                if (_secondaryScreenWindow.Content is Grid contentGrid)
+                                {
+                                    contentGrid.Children.Clear();
+                                    var imageElement = new System.Windows.Controls.Image
+                                    {
+                                        Source = new BitmapImage(new Uri(absolutePath)),
+                                        Stretch = Stretch.Fill, // Используем Fill для правильного масштабирования
+                                        HorizontalAlignment = HorizontalAlignment.Stretch,
+                                        VerticalAlignment = VerticalAlignment.Stretch,
+                                        ClipToBounds = false // Отключаем обрезку для масштабирования
+                                    };
+                                    contentGrid.Children.Add(imageElement);
+                                    
+                                    // Применяем масштаб к изображению
+                                    var transform = new ScaleTransform(_outputScaleX / 100.0, _outputScaleY / 100.0);
+                                    imageElement.RenderTransform = transform;
+                                    imageElement.RenderTransformOrigin = new System.Windows.Point(0.5, 0.5);
+                                }
+                                else
+                                {
+                                    // Если нет Grid, создаем новый Image
+                                    var imageElement = new System.Windows.Controls.Image
+                                    {
+                                        Source = new BitmapImage(new Uri(absolutePath)),
+                                        Stretch = Stretch.Fill, // Используем Fill для правильного масштабирования
+                                        HorizontalAlignment = HorizontalAlignment.Stretch,
+                                        VerticalAlignment = VerticalAlignment.Stretch,
+                                        ClipToBounds = false // Отключаем обрезку для масштабирования
+                                    };
+                                    
+                                    // Применяем масштаб к изображению
+                                    var transform = new ScaleTransform(_outputScaleX / 100.0, _outputScaleY / 100.0);
+                                    imageElement.RenderTransform = transform;
+                                    imageElement.RenderTransformOrigin = new System.Windows.Point(0.5, 0.5);
+                                    
+                                    _secondaryScreenWindow.Content = imageElement;
+                                }
+                                
+                                System.Diagnostics.Debug.WriteLine($"SyncMediaToSecondaryScreen: Синхронизировано изображение - Path={absolutePath}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Ошибка при синхронизации медиа со вторым экраном: {ex.Message}");
+        }
+    }
+    
     // Обработчик открытия меню Edit - обновляем устройства в реальном времени
     private void EditMenuItem_SubmenuOpened(object sender, RoutedEventArgs e)
     {
-        // Обновляем список экранов и аудиоустройств
+        // Обновляем список экранов
         _menuService.InitializeScreensMenu();
-        _menuService.InitializeAudioMenu();
     }
     
     // Создание окна на дополнительном экране
@@ -1130,6 +1377,16 @@ public partial class MainWindow : Window
         _secondaryMediaElement = _secondaryScreenService.SecondaryMediaElement;
         _secondaryVlcVideoView = _secondaryScreenService.SecondaryVlcVideoView;
         
+        // Применяем настройки вывода после создания окна (если окно уже создано)
+        if (_secondaryScreenWindow != null)
+        {
+            // Небольшая задержка, чтобы окно успело инициализироваться
+            _secondaryScreenWindow.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                ApplyOutputSettings();
+            }), System.Windows.Threading.DispatcherPriority.Loaded);
+        }
+        
         System.Diagnostics.Debug.WriteLine($"CreateSecondaryScreenWindow: Окно создано. Window={_secondaryScreenWindow != null}, MediaElement={_secondaryMediaElement != null}");
     }
     
@@ -1139,6 +1396,16 @@ public partial class MainWindow : Window
         _secondaryScreenService.CloseSecondaryScreenWindow();
         _secondaryScreenWindow = null;
         _secondaryMediaElement = null;
+
+        // Если был активен VLC-вывод на второй экран — останавливаем вторичный плеер и возвращаем звук основному
+        try
+        {
+            _vlcVideoService.Stop(forSecondary: true);
+        }
+        catch { /* ignore */ }
+
+        _vlcVideoService.SetDualScreenAudioMode(enabled: false);
+        _vlcDualScreenModeEnabled = false;
     }
     
     // Настройка аудиоустройства

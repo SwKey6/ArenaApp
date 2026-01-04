@@ -19,17 +19,28 @@ namespace ArenaApp.Services
         public event Action? EndReached;
         public event Action<string>? Error;
 
+        private DateTime _lastMainSyncUtc = DateTime.MinValue;
+
         public VlcVideoService()
         {
             // Важно: инициализация LibVLCSharp
             Core.Initialize();
 
-            LibVlc = new LibVLC();
+            // Базовые опции для более стабильного воспроизведения на Windows
+            // (минимально-инвазивные — без агрессивных кэшей/латентности)
+            LibVlc = new LibVLC(
+                "--no-video-title-show",
+                "--avcodec-hw=d3d11va"
+            );
             MainPlayer = new MediaPlayer(LibVlc);
             SecondaryPlayer = new MediaPlayer(LibVlc);
 
             Wire(MainPlayer);
             Wire(SecondaryPlayer);
+
+            // По умолчанию: звук идет только из основного плеера
+            TrySetMute(SecondaryPlayer, true);
+            TrySetMute(MainPlayer, false);
         }
 
         private void Wire(MediaPlayer player)
@@ -205,6 +216,52 @@ namespace ArenaApp.Services
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"VLC sync error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Режим "второй экран = мастер": звук идет только из SecondaryPlayer, а MainPlayer — беззвучное превью.
+        /// </summary>
+        public void SetDualScreenAudioMode(bool enabled)
+        {
+            // Если enabled=true: звук только у secondary
+            TrySetMute(MainPlayer, enabled);
+            TrySetMute(SecondaryPlayer, !enabled);
+        }
+
+        /// <summary>
+        /// Подстраивает основной плеер к вторичному (чтобы корректировки не дергали звук/видео на выходе).
+        /// Делает редкие корректировки (throttle), без постоянных "прыжков" каждую итерацию таймера.
+        /// </summary>
+        public void SyncMainToSecondaryThrottled(TimeSpan driftThreshold, TimeSpan minInterval)
+        {
+            if (!HasMedia(forSecondary: false) || !HasMedia(forSecondary: true)) return;
+            if (!IsPlaying(forSecondary: false) || !IsPlaying(forSecondary: true)) return;
+
+            var now = DateTime.UtcNow;
+            if (now - _lastMainSyncUtc < minInterval) return;
+
+            var mainPos = GetPosition(forSecondary: false);
+            var secondaryPos = GetPosition(forSecondary: true);
+            var drift = secondaryPos - mainPos;
+
+            if (Math.Abs(drift.TotalMilliseconds) >= Math.Abs(driftThreshold.TotalMilliseconds))
+            {
+                // Корректируем ТОЛЬКО основной плеер (превью), чтобы не портить звук/видео на выходе
+                SetPosition(secondaryPos, forSecondary: false);
+                _lastMainSyncUtc = now;
+            }
+        }
+
+        private static void TrySetMute(MediaPlayer player, bool mute)
+        {
+            try
+            {
+                player.Mute = mute;
+            }
+            catch
+            {
+                // ignore
             }
         }
 

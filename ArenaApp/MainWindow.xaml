@@ -142,9 +142,7 @@
                 <MenuItem Header="Экраны" Name="ScreensMenuItem">
                     <!-- Подменю экранов будет заполнено динамически -->
                 </MenuItem>
-                <MenuItem Header="Звук" Name="AudioMenuItem">
-                    <!-- Подменю звука будет заполнено динамически -->
-                </MenuItem>
+                <MenuItem Header="Настройки" Name="SettingsMenuItem" Click="SettingsMenuItem_Click"/>
             </MenuItem>
         </Menu>
         

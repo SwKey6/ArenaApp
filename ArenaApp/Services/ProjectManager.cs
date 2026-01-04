@@ -48,6 +48,12 @@ namespace ArenaApp.Services
                         _currentProject.GlobalSettings = new GlobalSettings();
                     }
                     
+                    // Убеждаемся, что OutputSettings инициализированы (для обратной совместимости)
+                    if (_currentProject.GlobalSettings.OutputSettings == null)
+                    {
+                        _currentProject.GlobalSettings.OutputSettings = new OutputSettings();
+                    }
+                    
                     // Если StorageMode не установлен (старые проекты) - устанавливаем Paths по умолчанию
                     // Это обратная совместимость
                     

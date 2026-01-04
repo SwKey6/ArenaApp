@@ -58,10 +58,11 @@ namespace ArenaApp.Services
                     var dialog = new Window
                     {
                         Title = "Настройки экрана",
-                        Width = 400,
-                        Height = 300,
+                        Width = 450,
+                        Height = 350,
                         WindowStartupLocation = WindowStartupLocation.CenterScreen,
-                        ResizeMode = ResizeMode.NoResize
+                        ResizeMode = ResizeMode.NoResize,
+                        Background = (System.Windows.Media.Brush)Application.Current.Resources["DarkBackgroundBrush"]
                     };
                     
                     var panel = new StackPanel { Margin = new Thickness(20) };
@@ -70,8 +71,9 @@ namespace ArenaApp.Services
                     var nameLabel = new TextBlock
                     {
                         Text = $"Экран {screenIndex + 1}: {screen.Bounds.Width}x{screen.Bounds.Height}",
-                        FontSize = 16,
+                        FontSize = 18,
                         FontWeight = FontWeights.Bold,
+                        Foreground = (System.Windows.Media.Brush)Application.Current.Resources["TextPrimaryBrush"],
                         Margin = new Thickness(0, 0, 0, 20)
                     };
                     panel.Children.Add(nameLabel);
@@ -83,6 +85,7 @@ namespace ArenaApp.Services
                     var infoLabel = new TextBlock
                     {
                         Text = infoText,
+                        Foreground = (System.Windows.Media.Brush)Application.Current.Resources["TextSecondaryBrush"],
                         Margin = new Thickness(0, 0, 0, 20)
                     };
                     panel.Children.Add(infoLabel);
@@ -92,6 +95,7 @@ namespace ArenaApp.Services
                     {
                         Content = "Воспроизводить на этом экране",
                         IsChecked = GetUseSelectedScreen?.Invoke() == true && GetSelectedScreenIndex?.Invoke() == screenIndex,
+                        Foreground = (System.Windows.Media.Brush)Application.Current.Resources["TextPrimaryBrush"],
                         Margin = new Thickness(0, 0, 0, 10)
                     };
                     panel.Children.Add(useScreenCheckBox);
@@ -101,6 +105,7 @@ namespace ArenaApp.Services
                     {
                         Content = "Заполнить весь экран (может обрезать изображение)",
                         IsChecked = GetUseUniformToFill?.Invoke() == true,
+                        Foreground = (System.Windows.Media.Brush)Application.Current.Resources["TextPrimaryBrush"],
                         Margin = new Thickness(0, 0, 0, 20),
                         ToolTip = "Если отключено - сохраняет пропорции изображения\nЕсли включено - заполняет весь экран, но может обрезать края"
                     };
@@ -112,7 +117,7 @@ namespace ArenaApp.Services
                         var warningLabel = new TextBlock
                         {
                             Text = "⚠️ Нельзя выводить на главный экран",
-                            Foreground = Brushes.Orange,
+                            Foreground = (System.Windows.Media.Brush)Application.Current.Resources["WarningBrush"],
                             FontWeight = FontWeights.Bold,
                             Margin = new Thickness(0, 0, 0, 20)
                         };
@@ -126,9 +131,15 @@ namespace ArenaApp.Services
                     var okButton = new Button
                     {
                         Content = "OK",
-                        Width = 80,
-                        Height = 30,
-                        Margin = new Thickness(5, 0, 0, 0)
+                        Width = 100,
+                        Height = 35,
+                        Margin = new Thickness(5, 0, 0, 0),
+                        Background = (System.Windows.Media.Brush)Application.Current.Resources["PrimaryAccentBrush"],
+                        Foreground = System.Windows.Media.Brushes.White,
+                        BorderBrush = (System.Windows.Media.Brush)Application.Current.Resources["PrimaryAccentHoverBrush"],
+                        BorderThickness = new Thickness(1),
+                        FontWeight = FontWeights.SemiBold,
+                        Cursor = System.Windows.Input.Cursors.Hand
                     };
                     okButton.Click += (s, e) =>
                     {
@@ -159,9 +170,15 @@ namespace ArenaApp.Services
                     var cancelButton = new Button
                     {
                         Content = "Отмена",
-                        Width = 80,
-                        Height = 30,
-                        Margin = new Thickness(5, 0, 0, 0)
+                        Width = 100,
+                        Height = 35,
+                        Margin = new Thickness(5, 0, 0, 0),
+                        Background = (System.Windows.Media.Brush)Application.Current.Resources["DangerBrush"],
+                        Foreground = System.Windows.Media.Brushes.White,
+                        BorderBrush = (System.Windows.Media.Brush)Application.Current.Resources["DangerBrush"],
+                        BorderThickness = new Thickness(1),
+                        FontWeight = FontWeights.SemiBold,
+                        Cursor = System.Windows.Input.Cursors.Hand
                     };
                     cancelButton.Click += (s, e) => dialog.Close();
                     
